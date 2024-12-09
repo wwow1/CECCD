@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <stdint.h>
 #include <string.h>
 #include <cmath>
@@ -21,10 +22,10 @@ using namespace std;
 
 namespace elastic_rose
 {
-    using u8 = unsigned char;
-    using u16 = unsigned short;
-    using u32 = unsigned int;
-    using u64 = unsigned long;
+    using u8 = uint8_t;
+    using u16 = uint16_t;
+    using u32 = uint32_t;
+    using u64 = uint64_t;
     static void LeveldbBloomHash(const u64 key, u32 *out, u32 hash_code)
     {
         MurmurHash3_x86_128((const char *)(&key), sizeof(u64), hash_code, out);

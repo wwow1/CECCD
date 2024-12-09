@@ -1,0 +1,3 @@
+[submodule "CRoaring"]
+	path = CRoaring
+	url = git@github.com:wwow1/CRoaring.git
