@@ -10,7 +10,9 @@
 #include "../include/common.h"
 #include "roaring.hh"
 #include "roaring.h"
+#include <omp.h>
 #include <postgresql/libpq-fe.h>
+#include <tbb/concurrent_hash_map.h>
 
 class EdgeCacheIndex {
 private:
@@ -18,7 +20,7 @@ private:
         std::unordered_map< std::string, elastic_rose::Rosetta > rosetta_index_;
     };
     std::string nodeId_;  // 当前节点ID
-     // 邻居Id -> <数据源ID, 压缩位图>
+     // 数据源ID -> <邻居Id, 压缩位图>
      // 压缩位图中保存的是时间点
     Common::TableSchema schema_;
     std::unordered_map< std::string, std::unordered_map< std::string, roaring::Roaring64Map > > timeseries_main_index_;
@@ -36,7 +38,8 @@ public:
         const std::string& neighbor_nodeId, PGresult* migrate_data);
 
     std::vector<std::string> queryIndex(const std::string& dataKey) const;
-
+    tbb::concurrent_hash_map<uint64_t, std::string>& queryMainIndex(const std::string& src_monitor_id, 
+        const uint64_t& timeseries_start, const uint64_t& timeseries_end)
     // void printIndex() const {
     //     std::cout << "EdgeCacheIndex (Node ID: " << nodeId << ")\n";
     //     for (const auto& [dataKey, neighbors] : neighborIndex) {
