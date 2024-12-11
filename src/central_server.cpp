@@ -1,63 +1,59 @@
-#include <grpcpp/grpcpp.h>
-#include "edge_server.grpc.pb.h"
+#include "center_server.h"
+#include <grpcpp/server_builder.h>
 #include <iostream>
-#include <string>
-#include <thread>
 
-using grpc::Server;
-using grpc::ServerBuilder;
-using grpc::ServerContext;
-using grpc::Status;
-using grpc::ServerWriter;
-using grpc::ServerReaderWriter;
+CenterServer::CenterServer() {}
 
-using namespace std;
+grpc::Status CenterServer::ReportStatistics(grpc::ServerContext* context,
+                                            const cloud_edge_cache::StatisticsReport* request,
+                                            cloud_edge_cache::Empty* response) {
+    std::cout << "Received statistics report:" << std::endl;
+    for (const auto& key : request->metadata().keys()) {
+        std::cout << "  Key: " << key << std::endl;
+        access_count_[key]++; // Increment access count for the key
+    }
+    return grpc::Status::OK;
+}
 
-class CentralServerImpl final : public EdgeServer::Service {
-public:
-    // 接收来自边缘服务器的请求统计
-    Status ReportStatistics(ServerContext* context, const StatisticsRequest* request,
-                            StatisticsResponse* response) override {
-        // 处理接收到的访问记录
-        cout << "Received statistics from Edge Server:" << endl;
-        for (const auto& record : request->access_records()) {
-            cout << "Data Source ID: " << record.data_source_id()
-                 << ", Timestamp: " << record.timestamp() << endl;
+void CenterServer::ReplaceCache(const std::vector<std::string>& keys) {
+    for (const auto& edge_server_address : edge_server_addresses_) {
+        auto stub = cachesystem::CacheReplacementService::NewStub(grpc::CreateChannel(
+            edge_server_address, grpc::InsecureChannelCredentials()));
+
+        cachesystem::CacheReplacementRequest request;
+        for (const auto& key : keys) {
+            request.add_keys(key);
         }
 
-        response->set_status("Statistics received successfully");
-        return Status::OK;
-    }
+        cachesystem::CacheReplacementResponse response;
+        grpc::ClientContext context;
 
-    // 向边缘服务器下发缓存更新任务
-    Status UpdateCache(ServerContext* context, const CacheUpdateRequest* request,
-                       CacheUpdateResponse* response) override {
-        cout << "Received cache update request:" << endl;
-        for (const auto& query : request->queries()) {
-            cout << "Cache update query: " << query << endl;
+        grpc::Status status = stub->ReplaceCache(&context, request, &response);
+
+        if (status.ok()) {
+            std::cout << "Successfully replaced cache on " << edge_server_address << std::endl;
+        } else {
+            std::cerr << "Failed to replace cache on " << edge_server_address
+                      << ": " << status.error_message() << std::endl;
         }
-
-        response->set_status("Cache updated successfully");
-        return Status::OK;
     }
-};
+}
 
-// 启动中心服务器
-void RunServer() {
-    string server_address("0.0.0.0:50051");
-    CentralServerImpl service;
-
-    ServerBuilder builder;
+void CenterServer::Start(const std::string& server_address) {
+    grpc::ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-    builder.RegisterService(&service);
+    builder.RegisterService(this); // Register both services
 
-    cout << "Central Server listening on " << server_address << endl;
-    unique_ptr<Server> server(builder.BuildAndStart());
-
+    std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
+    std::cout << "Center server is running on " << server_address << std::endl;
     server->Wait();
 }
 
 int main() {
-    RunServer();
+    // Start center server
+    const std::string server_address = "localhost:50053";
+    CenterServer center_server;
+    center_server.Start(server_address);
+
     return 0;
 }

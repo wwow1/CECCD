@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package cloud_edge_cache;
+
+// Metadata message for data keys
+message Metadata {
+    string table_name = 1; // List of keys (table_name+source_id+timestamp)
+    string source_id = 2;
+    uint64 timestamp = 3;
+}
+
+// Empty message for responses
+message Empty {}
+
+// Statistics report message
+message StatisticsReport {
+    repeated Metadata metadata = 1; // Accessed data keys
+}
+
+// Cache replacement message
+message CacheReplacement {
+    repeated Metadata metadata = 1; // Keys to be cached in the next cycle
+}
+
+// Cache update message
+message UpdateCacheMeta {
+    repeated Metadata metadata = 1; // Keys to be cached in the next cycle
+}
+
+// Query request and response
+message QueryRequest {
+    string sql_query = 1; // SQL query string
+}
+
+message QueryResponse {
+    string result = 1; // Query result as a string
+}
+
+// APIs for the client to interact with the edge server
+service ClientToEdge {
+    rpc Query(QueryRequest) returns (QueryResponse);
+}
+
+// APIs for edge-to-edge metadata updates
+service EdgeToEdge {
+    rpc UpdateMetadata(UpdateCacheMeta) returns (Empty);
+}
+
+// APIs for edge-to-center communication
+service EdgeToCenter {
+    rpc ReportStatistics(StatisticsReport) returns (Empty);
+}
+
+// APIs for center-to-edge communication
+service CenterToEdge {
+    rpc ReplaceCache(CacheReplacement) returns (Empty);
+}

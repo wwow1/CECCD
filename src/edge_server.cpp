@@ -1,137 +1,112 @@
-#include <grpcpp/grpcpp.h>
-#include "edge_server.grpc.pb.h"
-#include <pqxx/pqxx>
+#include "edge_server.h"
+#include <grpcpp/server_builder.h>
 #include <iostream>
-#include <thread>
-#include <chrono>
-#include <map>
-#include <vector>
-#include <mutex>
 
-using grpc::Server;
-using grpc::ServerBuilder;
-using grpc::ServerContext;
-using grpc::Status;
-using grpc::ClientContext;
-using grpc::Channel;
-
-// 数据库连接信息
-const std::string DB_CONNECTION = "host=localhost port=5432 dbname=timescaledb user=postgres password=password";
-
-// 全局访问记录
-std::mutex access_records_mutex;
-std::vector<AccessRecord> access_records;
-
-// 边缘服务器实现
-class EdgeServerImpl final : public EdgeServer::Service {
-public:
-    // 处理用户SQL请求
-    Status ExecuteSQL(ServerContext* context, const SQLRequest* request, SQLResponse* response) override {
-        try {
-            pqxx::connection conn(DB_CONNECTION);
-            pqxx::work txn(conn);
-
-            // 执行查询
-            pqxx::result result = txn.exec(request->query());
-            std::string formatted_result;
-            for (const auto& row : result) {
-                for (const auto& field : row) {
-                    formatted_result += field.c_str();
-                    formatted_result += "\t";
-                }
-                formatted_result += "\n";
-            }
-            response->set_result(formatted_result);
-
-            // 记录访问记录
-            {
-                std::lock_guard<std::mutex> lock(access_records_mutex);
-                AccessRecord record;
-                record.set_data_source_id(request->data_source_id());
-                record.set_timestamp(request->timestamp());
-                access_records.push_back(record);
-            }
-
-            return Status::OK;
-        } catch (const std::exception& e) {
-            std::cerr << "SQL Execution Error: " << e.what() << std::endl;
-            return Status::CANCELLED;
-        }
-    }
-
-    // 中心服务器下发缓存更新任务
-    Status UpdateCache(ServerContext* context, const CacheUpdateRequest* request, CacheUpdateResponse* response) override {
-        try {
-            pqxx::connection conn(DB_CONNECTION);
-            pqxx::work txn(conn);
-
-            for (const auto& query : request->queries()) {
-                txn.exec(query); // 执行缓存更新任务
-            }
-            txn.commit();
-            response->set_status("Cache updated successfully");
-            return Status::OK;
-        } catch (const std::exception& e) {
-            std::cerr << "Cache Update Error: " << e.what() << std::endl;
-            return Status::CANCELLED;
-        }
-    }
-};
-
-// 周期性上报访问记录到中心服务器
-void ReportStatistics() {
-    auto channel = grpc::CreateChannel("central_server_address:50051", grpc::InsecureChannelCredentials());
-    auto stub = EdgeServer::NewStub(channel);
-
-    while (true) {
-        // 准备访问记录
-        std::vector<AccessRecord> records_to_send;
-        {
-            std::lock_guard<std::mutex> lock(access_records_mutex);
-            records_to_send = std::move(access_records); // 清空全局访问记录
-            access_records.clear();
-        }
-
-        if (!records_to_send.empty()) {
-            ClientContext context;
-            StatisticsRequest request;
-
-            for (const auto& record : records_to_send) {
-                *request.add_access_records() = record; // 添加记录
-            }
-
-            StatisticsResponse response;
-            Status status = stub->ReportStatistics(&context, request, &response);
-
-            if (!status.ok()) {
-                std::cerr << "Failed to report statistics: " << status.error_message() << std::endl;
-            } else {
-                std::cout << "Reported statistics: " << response.status() << std::endl;
-            }
-        }
-
-        std::this_thread::sleep_for(std::chrono::minutes(1)); // 每分钟上报一次
-    }
+EdgeServer::EdgeServer() {
+    // Simulated initial cache (key-value pairs)
+    cache_["table1:source1:1660000000"] = "{\"value\": 42}";
+    cache_["table2:source2:1660000100"] = "{\"value\": 23}";
 }
 
-void RunServer() {
-    std::string server_address("0.0.0.0:50052");
-    EdgeServerImpl service;
+grpc::Status EdgeServer::Query(grpc::ServerContext* context,
+                               const cloud_edge_cache::QueryRequest* request,
+                               cloud_edge_cache::QueryResponse* response) {
+    std::string sql_query = request->sql_query();
+    // TODO(zhengfuyu): 把timestamp提取出来,其它的照旧
+    if (cache_.find(sql_query) != cache_.end()) {
+        response->set_result(cache_[sql_query]);
+    } else {
+        response->set_result("No data found for the given query.");
+    }
+    return grpc::Status::OK;
+}
 
-    ServerBuilder builder;
+grpc::Status EdgeServer::UpdateMetadata(grpc::ServerContext* context,
+                                        const cloud_edge_cache::Metadata* request,
+                                        cloud_edge_cache::Empty* response) {
+    // Simulate metadata update
+    std::cout << "Updating metadata with the following keys:" << std::endl;
+    for (const auto& key : request->keys()) {
+        std::cout << key << std::endl;
+        // Simulate adding or refreshing cache entry
+        cache_[key] = "{\"value\": \"updated\"}"; // Dummy updated value
+    }
+    return grpc::Status::OK;
+}
+
+grpc::Status ReplaceCache(grpc::ServerContext* context, 
+                          const cloud_edge_cache::Metadata* request,
+                          cloud_edge_cache::Empty* response) {
+    for (const auto& key : request->keys()) {
+        std::cout << "Received cache replacement request for key: " << key << std::endl;
+        // 模拟缓存替换逻辑
+    }
+    response->set_success(true);
+    return grpc::Status::OK;
+}
+
+void EdgeServer::Start(const std::string& server_address) {
+    grpc::ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-    builder.RegisterService(&service);
+    builder.RegisterService(this); // Register both services
 
-    std::cout << "Edge Server listening on " << server_address << std::endl;
-    std::unique_ptr<Server> server(builder.BuildAndStart());
-
-    // 启动上报线程
-    std::thread(ReportStatistics).detach();
-
+    std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
+    std::cout << "Edge server is running on " << server_address << std::endl;
     server->Wait();
 }
 
+void EdgeServer::PushMetadataUpdate(const std::vector<std::string>& keys, const std::string& target_server_address) {
+    // 建立目标边缘服务器的 gRPC 通道
+    auto stub = cachesystem::MetadataUpdateService::NewStub(grpc::CreateChannel(
+        target_server_address, grpc::InsecureChannelCredentials()));
+
+    // 准备请求
+    cachesystem::MetadataUpdateRequest request;
+    for (const auto& key : keys) {
+        request.add_keys(key);
+    }
+
+    // 响应和上下文
+    cachesystem::MetadataUpdateResponse response;
+    grpc::ClientContext context;
+
+    // 发起请求
+    grpc::Status status = stub->UpdateMetadata(&context, request, &response);
+
+    if (status.ok()) {
+        std::cout << "Successfully pushed metadata update to " << target_server_address << std::endl;
+    } else {
+        std::cerr << "Failed to push metadata update to " << target_server_address 
+                  << ": " << status.error_message() << std::endl;
+    }
+}
+
+void EdgeServer::ReportStatistics(const std::vector<std::string>& keys) {
+    auto stub = cachesystem::ReportStatisticsService::NewStub(grpc::CreateChannel(
+        center_server_address_, grpc::InsecureChannelCredentials()));
+
+    cachesystem::StatisticsRequest request;
+    for (const auto& key : keys) {
+        request.add_keys(key);
+    }
+
+    cachesystem::StatisticsResponse response;
+    grpc::ClientContext context;
+
+    grpc::Status status = stub->ReportStatistics(&context, request, &response);
+
+    if (status.ok()) {
+        std::cout << "Successfully reported statistics to center server" << std::endl;
+    } else {
+        std::cerr << "Failed to report statistics to center server: " << status.error_message() << std::endl;
+    }
+}
+
 int main() {
-    RunServer();
+    // Start edge server
+    const std::string server_address = "localhost:50052";
+    EdgeServer edge_server;
+    edge_server.Start(server_address);
+
     return 0;
 }

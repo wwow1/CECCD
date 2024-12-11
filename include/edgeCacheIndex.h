@@ -19,7 +19,7 @@ private:
     struct TableRosetta {
         std::unordered_map< std::string, elastic_rose::Rosetta > rosetta_index_;
     };
-    std::string nodeId_;  // 当前节点ID
+    std::string nodeId_;  // 当前节点ID(直接用地址来表示？)
      // 数据源ID -> <邻居Id, 压缩位图>
      // 压缩位图中保存的是时间点
     Common::TableSchema schema_;
