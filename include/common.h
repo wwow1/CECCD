@@ -9,6 +9,12 @@
 namespace Common {
 // 定义一些常用的类型映射或枚举（可选）
 
+struct UniqueKey {
+    std::string table_name_;
+    std::string source_id_;
+    uint64_t timestamp_;
+};
+
 enum class DataType {
     INT,
     STRING,
@@ -28,47 +34,20 @@ struct Column {
         : name(name), type(type), isPrimaryKey(isPrimaryKey), isNullable(isNullable) {}
 };
 
-// 定义一个通用的数据库表 Schema 结构
-class TableSchema {
-public:
-    std::vector<Column> columns;
-    // 默认构造函数
-    TableSchema() = default;
+// 定义一个通用的每个数据流的最小表结构
+struct StreamMeta {
+    std::string datastream_id_;
+    uint32_t unique_id_;
+    uint64_t start_time_;
+    uint32_t time_range_;
+};
 
-    // 赋值运算符重载
-    TableSchema& operator=(const TableSchema& other) {
-        if (this != &other) { // 防止自赋值
-            columns.clear();  // 清除现有数据
-            copyFrom(other);  // 复制数据
-        }
-        return *this;
-    }
-
-    // 自定义复制函数
-    void copyFrom(const TableSchema& other) {
-        columns = other.columns;
-    }
-
-    // 拷贝构造函数
-    TableSchema(const TableSchema& other) {
-        copyFrom(other);
-    }
-    
-    // 添加列的方法
-    void addColumn(const std::string& name, const std::string& type, bool isPrimaryKey = false, bool isNullable = true) {
-        columns.emplace_back(name, type, isPrimaryKey, isNullable);
-    }
-
-    // 打印 Schema 信息的方法
-    void printSchema() const {
-        std::cout << "Table Schema:\n";
-        for (const auto& col : columns) {
-            std::cout << "Column: " << col.name
-                      << ", Primary Key: " << (col.isPrimaryKey ? "Yes" : "No")
-                      << ", Nullable: " << (col.isNullable ? "Yes" : "No")
-                      << std::endl;
-        }
-    }
+class BaseIndex {
+    public:
+    virtual ~BaseIndex() = default;
+    virtual void add(uint32_t datastreamID, uint32_t blockId) = 0; // 纯虚函数
+    virtual void remove(uint32_t datastreamID, uint32_t blockId ) = 0; // 纯虚函数
+    virtual std::vector<uint32_t> range_query(uint32_t datastreamID, uint32_t start_blockId, uint32_t end_blockId) const = 0; // 纯虚函数
 };
 
 } // namespace Common

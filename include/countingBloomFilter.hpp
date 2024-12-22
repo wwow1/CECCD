@@ -7,7 +7,6 @@
 #pragma once
 
 #include <cstdint>
-#include <stdint.h>
 #include <string.h>
 #include <cmath>
 
@@ -139,7 +138,7 @@ namespace elastic_rose
 
         // 返回false代表实际插入的键已远大于预期键的数量,或是存在计数器溢出，需要重构
         template<class T>
-        bool PutKey(const T &key)
+        bool Add(const T &key)
         {
             const size_t len = filter_data_.size();
 
@@ -168,7 +167,7 @@ namespace elastic_rose
         }
 
         template<class T>
-        bool DeleteKey(const T &key)
+        bool Remove(const T &key)
         {
             const size_t len = filter_data_.size();
 
@@ -194,6 +193,7 @@ namespace elastic_rose
             insert_num_--;
             return true;
         }
+
 
         template<class T>
         bool KeyMayMatch(const T &key) const

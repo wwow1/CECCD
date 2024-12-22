@@ -24,7 +24,8 @@ message CacheReplacement {
 
 // Cache update message
 message UpdateCacheMeta {
-    repeated Metadata metadata = 1; // Keys to be cached in the next cycle
+    string src_node_addr = 1;
+    repeated Metadata metadata = 2; // Keys to be cached in the next cycle
 }
 
 // Query request and response
@@ -32,8 +33,22 @@ message QueryRequest {
     string sql_query = 1; // SQL query string
 }
 
+// Row represents a single row of data
+message Row {
+    repeated string values = 1;  // Values in string format
+}
+
+// Column metadata
+message Column {
+    string name = 1;
+    string type = 2;
+}
+
+// Query response with structured result
 message QueryResponse {
-    string result = 1; // Query result as a string
+    repeated Column columns = 1;  // Column metadata
+    repeated Row rows = 2;        // Result rows
+    string error = 3;            // Error message if query fails
 }
 
 // APIs for the client to interact with the edge server
@@ -44,6 +59,7 @@ service ClientToEdge {
 // APIs for edge-to-edge metadata updates
 service EdgeToEdge {
     rpc UpdateMetadata(UpdateCacheMeta) returns (Empty);
+    rpc SubQuery(QueryRequest) returns (QueryResponse);
 }
 
 // APIs for edge-to-center communication

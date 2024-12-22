@@ -6,51 +6,87 @@
 #include <vector>
 #include <algorithm>
 #include <iostream>
-#include "../include/rosetta.hpp"
-#include "../include/common.h"
+#include "countingBloomFilter.hpp"
+#include "common.h"
+#include "cloud_edge_cache.grpc.pb.h"
 #include "roaring.hh"
-#include "roaring.h"
-#include <omp.h>
-#include <postgresql/libpq-fe.h>
 #include <tbb/concurrent_hash_map.h>
+
+struct MyBloomFilter : public Common::BaseIndex {
+    elastic_rose::CountingBloomFilter bloom_filter_;
+    void add(uint32_t datastreamID, uint32_t blockId) {
+        bloom_filter_.Add(datastreamID + ":" + std::to_string(blockId));
+    }
+    void remove(uint32_t datastreamID, uint32_t blockId) {
+        bloom_filter_.Remove(datastreamID + ":" + std::to_string(blockId));
+    }
+    std::vector<uint32_t> range_query(uint32_t datastreamID,
+        const uint32_t start_blockId, const uint32_t end_blockId) const {
+        std::vector<uint32_t> result;
+        for (uint32_t blockId = start_blockId; blockId <= end_blockId; blockId++) {
+            if (bloom_filter_.KeyMayMatch(datastreamID + ":" + std::to_string(blockId))) {
+                result.push_back(blockId);
+            }
+        }
+        return result;
+    }
+};
+
+struct MixIndex : public Common::BaseIndex {
+    // datastreamID-> blockID
+    std::unordered_map< uint32_t, roaring::Roaring > index_;
+    void add(uint32_t datastreamID, uint32_t blockId) {
+        index_[datastreamID].add(blockId);
+    }
+    void remove(uint32_t datastreamID, uint32_t blockId) {
+        index_[datastreamID].remove(blockId);
+    }
+    // [start_blockId, end_blockId]
+    std::vector<uint32_t> range_query(uint32_t datastreamID,
+        const uint32_t start_blockId, const uint32_t end_blockId) const {
+        std::vector<uint32_t> result;
+        roaring::Roaring range_bitmap;
+        range_bitmap.addRange(start_blockId, end_blockId + 1); // 创建范围
+        auto it = index_.find(datastreamID);
+        if (it != index_.end()) {
+            roaring::Roaring result_bitmap = it->second & range_bitmap;
+            // 直接获取结果位图中的所有值
+            result.reserve(result_bitmap.cardinality());
+            for(uint32_t value : result_bitmap) {
+                result.push_back(value);
+            }
+        }
+        return result;
+    }
+};
 
 class EdgeCacheIndex {
 private:
-    struct TableRosetta {
-        std::unordered_map< std::string, elastic_rose::Rosetta > rosetta_index_;
+    // 数据源名字 -> 数据源元数据
+    std::unordered_map< std::string, Common::StreamMeta > schema_;
+    // 节点ID -> [数据源ID -> 压缩位图]
+    std::unordered_map<std::string, std::unique_ptr<Common::BaseIndex>> timeseries_main_index_;
+    // 添加一个枚举来指定索引类型
+    enum class IndexType {
+        MIX_INDEX,
+        BLOOM_FILTER
     };
-    std::string nodeId_;  // 当前节点ID(直接用地址来表示？)
-     // 数据源ID -> <邻居Id, 压缩位图>
-     // 压缩位图中保存的是时间点
-    Common::TableSchema schema_;
-    std::unordered_map< std::string, std::unordered_map< std::string, roaring::Roaring64Map > > timeseries_main_index_;
-    std::unordered_map< std::string, std::unordered_map< std::string, TableRosetta > > fields_index_;
+    std::unordered_map<std::string, IndexType> index_type_;
 
 public:
-    EdgeCacheIndex(const std::string& id, Common::TableSchema schema) : nodeId_(id) {
-        // TODO(zhengfuyu) : rosetta初始化
-    }
+    EdgeCacheIndex() {}
 
-    void updateIndex(const uint64_t timeseries_key, const std::string& src_monitor_id, 
-        const std::string& neighbor_nodeId, PGresult* migrate_data);
+    uint32_t getBlockId(uint64_t block_start_time, std::string datastream_id);
 
-    void removeFromIndex(const uint64_t timeseries_key, const std::string& src_monitor_id, 
-        const std::string& neighbor_nodeId, PGresult* migrate_data);
+    void updateIndex(const std::string& neighbor_nodeId, const cloud_edge_cache::Metadata& meta);
+
+    void updateStreamMeta(const std::vector<Common::StreamMeta> stream_metas);
+
+    void removeFromIndex(const std::string& neighbor_nodeId, const cloud_edge_cache::Metadata& meta);
 
     std::vector<std::string> queryIndex(const std::string& dataKey) const;
-    tbb::concurrent_hash_map<uint64_t, std::string>& queryMainIndex(const std::string& src_monitor_id, 
-        const uint64_t& timeseries_start, const uint64_t& timeseries_end)
-    // void printIndex() const {
-    //     std::cout << "EdgeCacheIndex (Node ID: " << nodeId << ")\n";
-    //     for (const auto& [dataKey, neighbors] : neighborIndex) {
-    //         std::cout << "  Data Key: " << dataKey << " -> [";
-    //         for (size_t i = 0; i < neighbors.size(); ++i) {
-    //             std::cout << neighbors[i];
-    //             if (i < neighbors.size() - 1) std::cout << ", ";
-    //         }
-    //         std::cout << "]\n";
-    //     }
-    // }
+    tbb::concurrent_hash_map<uint32_t, std::string>& queryMainIndex(const std::string& datastream_id, const uint64_t& timeseries_start, 
+        const uint64_t& timeseries_end);
 };
 
 #endif // EDGE_CACHE_INDEX_HPP

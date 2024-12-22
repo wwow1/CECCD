@@ -1,0 +1,28 @@
+{
+    "cluster": {
+        "nodes": [
+            {
+                "id": "node1",
+                "address": "localhost:50051"
+            },
+            {
+                "id": "node2",
+                "address": "localhost:50052"
+            },
+            {
+                "id": "node3",
+                "address": "localhost:50053"
+            }
+        ],
+        "center_node": {
+            "address": "localhost:50050"
+        }
+    },
+    "database": {
+        "host": "localhost",
+        "port": "5432",
+        "dbname": "edge_cache_db",
+        "user": "postgres",
+        "password": "postgres"
+    }
+} 

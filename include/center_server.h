@@ -23,6 +23,7 @@ public:
 
 private:
     std::unordered_map<std::string, int> access_count_; // Tracks access counts per key
+    uint64_t cache_period_;
     std::vector<std::string> replacement_keys_;         // Keys for cache replacement
 };
 

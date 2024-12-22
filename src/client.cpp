@@ -21,7 +21,25 @@ std::string Client::Query(const std::string& sql_query) {
 
     // Handle response
     if (status.ok()) {
-        return response.result();
+        // Check for errors
+        if (!response.error().empty()) {
+            return "Query error: " + response.error();
+        }
+
+        // Print column headers
+        for (const auto& column : response.columns()) {
+            std::cout << column.name() << "(" << column.type() << ")\t";
+        }
+        std::cout << std::endl;
+
+        // Print rows
+        for (const auto& row : response.rows()) {
+            for (const auto& value : row.values()) {
+                std::cout << value << "\t";
+            }
+            std::cout << std::endl;
+        }
+        return "Query success";
     } else {
         return "RPC failed: " + status.error_message();
     }
