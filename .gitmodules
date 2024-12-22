@@ -7,6 +7,6 @@
 [submodule "third_party/libpqxx"]
 	path = third_party/libpqxx
 	url = https://github.com/jtv/libpqxx.git
-[submodule "config/third_party/json"]
-	path = config/third_party/json
+[submodule "third_party/json"]
+	path = third_party/json
 	url = https://github.com/nlohmann/json.git
