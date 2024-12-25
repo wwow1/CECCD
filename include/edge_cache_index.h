@@ -11,17 +11,22 @@
 #include "cloud_edge_cache.grpc.pb.h"
 #include "roaring.hh"
 #include <tbb/concurrent_hash_map.h>
+#include <shared_mutex>
 
 struct MyBloomFilter : public Common::BaseIndex {
+    mutable std::shared_mutex mutex_;
     elastic_rose::CountingBloomFilter bloom_filter_;
     void add(uint32_t datastreamID, uint32_t blockId) {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         bloom_filter_.Add(datastreamID + ":" + std::to_string(blockId));
     }
     void remove(uint32_t datastreamID, uint32_t blockId) {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         bloom_filter_.Remove(datastreamID + ":" + std::to_string(blockId));
     }
     std::vector<uint32_t> range_query(uint32_t datastreamID,
         const uint32_t start_blockId, const uint32_t end_blockId) const {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
         std::vector<uint32_t> result;
         for (uint32_t blockId = start_blockId; blockId <= end_blockId; blockId++) {
             if (bloom_filter_.KeyMayMatch(datastreamID + ":" + std::to_string(blockId))) {
@@ -33,24 +38,31 @@ struct MyBloomFilter : public Common::BaseIndex {
 };
 
 struct MixIndex : public Common::BaseIndex {
-    // datastreamID-> blockID
-    std::unordered_map< uint32_t, roaring::Roaring > index_;
+    mutable std::shared_mutex mutex_;
+    std::unordered_map<uint32_t, roaring::Roaring> index_;
+    
     void add(uint32_t datastreamID, uint32_t blockId) {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         index_[datastreamID].add(blockId);
     }
+    
     void remove(uint32_t datastreamID, uint32_t blockId) {
-        index_[datastreamID].remove(blockId);
-    }
-    // [start_blockId, end_blockId]
-    std::vector<uint32_t> range_query(uint32_t datastreamID,
-        const uint32_t start_blockId, const uint32_t end_blockId) const {
-        std::vector<uint32_t> result;
-        roaring::Roaring range_bitmap;
-        range_bitmap.addRange(start_blockId, end_blockId + 1); // 创建范围
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         auto it = index_.find(datastreamID);
         if (it != index_.end()) {
+            it->second.remove(blockId);
+        }
+    }
+    
+    std::vector<uint32_t> range_query(uint32_t datastreamID,
+        const uint32_t start_blockId, const uint32_t end_blockId) const {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        std::vector<uint32_t> result;
+        auto it = index_.find(datastreamID);
+        if (it != index_.end()) {
+            roaring::Roaring range_bitmap;
+            range_bitmap.addRange(start_blockId, end_blockId + 1);
             roaring::Roaring result_bitmap = it->second & range_bitmap;
-            // 直接获取结果位图中的所有值
             result.reserve(result_bitmap.cardinality());
             for(uint32_t value : result_bitmap) {
                 result.push_back(value);
@@ -62,8 +74,6 @@ struct MixIndex : public Common::BaseIndex {
 
 class EdgeCacheIndex {
 private:
-    // 数据源名字 -> 数据源元数据
-    std::unordered_map< std::string, Common::StreamMeta > schema_;
     // 节点ID -> [数据源ID -> 压缩位图]
     std::unordered_map<std::string, std::unique_ptr<Common::BaseIndex>> timeseries_main_index_;
     // 添加一个枚举来指定索引类型
@@ -72,21 +82,25 @@ private:
         BLOOM_FILTER
     };
     std::unordered_map<std::string, IndexType> index_type_;
+    std::unordered_map<std::string, int64_t> node_latencies_;
+    int64_t config_latency_threshold_ms_ = 30; // 默认阈值为30ms
+
+    std::unique_ptr<Common::BaseIndex> createIndex(const std::string& nodeId);
 
 public:
     EdgeCacheIndex() {}
 
-    uint32_t getBlockId(uint64_t block_start_time, std::string datastream_id);
-
     void updateIndex(const std::string& neighbor_nodeId, const cloud_edge_cache::Metadata& meta);
-
-    void updateStreamMeta(const std::vector<Common::StreamMeta> stream_metas);
 
     void removeFromIndex(const std::string& neighbor_nodeId, const cloud_edge_cache::Metadata& meta);
 
     std::vector<std::string> queryIndex(const std::string& dataKey) const;
-    tbb::concurrent_hash_map<uint32_t, std::string>& queryMainIndex(const std::string& datastream_id, const uint64_t& timeseries_start, 
-        const uint64_t& timeseries_end);
+
+    tbb::concurrent_hash_map<uint32_t, std::string>& queryMainIndex(const std::string& datastream_id, const uint32_t start_blockId, 
+        const uint32_t end_blockId, const uint32_t stream_uniqueId);
+
+    void setNodeLatency(const std::string& nodeId, int64_t latency);
+    void setLatencyThreshold(int64_t threshold);
 };
 
 #endif // EDGE_CACHE_INDEX_HPP

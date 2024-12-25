@@ -3,20 +3,27 @@
         "nodes": [
             {
                 "id": "node1",
-                "address": "localhost:50051"
+                "address": "localhost:50051",
+                "capacity_gb": 1
             },
             {
                 "id": "node2",
-                "address": "localhost:50052"
+                "address": "localhost:50052",
+                "capacity_gb": 1
             },
             {
                 "id": "node3",
-                "address": "localhost:50053"
+                "address": "localhost:50053",
+                "capacity_gb": 1
             }
         ],
         "center_node": {
             "address": "localhost:50050"
-        }
+        },
+        "block_size_mb": 64,
+        "index_latency_threshold_ms": 30,
+        "statistics_report_interval_ms": 5000,
+        "prediction_period_ms": 30000
     },
     "database": {
         "host": "localhost",

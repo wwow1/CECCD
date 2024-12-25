@@ -5,7 +5,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 设置项目的 include 目录
-include_directories(${PROJECT_SOURCE_DIR}/include)
+include_directories(
+    ${PROJECT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_BINARY_DIR}
+)
 
 # Find required packages
 find_package(Protobuf REQUIRED)
@@ -45,7 +48,7 @@ set(PROTO_HDRS
 # Common source files
 set(COMMON_SOURCES
     src/config_manager.cpp
-    src/edgeCacheIndex.cpp
+    src/edge_cache_index.cpp
 )
 
 # 添加 json 库

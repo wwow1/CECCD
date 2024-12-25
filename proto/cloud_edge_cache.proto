@@ -3,29 +3,35 @@ syntax = "proto3";
 package cloud_edge_cache;
 
 // Metadata message for data keys
-message Metadata {
-    string table_name = 1; // List of keys (table_name+source_id+timestamp)
-    string source_id = 2;
-    uint64 timestamp = 3;
+message StreamMetadata {
+    string datastream_id = 1;
+    uint32 unique_id = 2;
+    uint64 start_time = 3;
+    uint32 time_range = 4;
+    repeated uint32 block_ids = 5;
 }
 
 // Empty message for responses
 message Empty {}
 
-// Statistics report message
-message StatisticsReport {
-    repeated Metadata metadata = 1; // Accessed data keys
+// Block access statistics
+message BlockAccessInfo {
+    uint32 datastream_unique_id = 1;         // ID of the data block
+    uint32 block_id = 2;    // Unique ID of the datastream this block belongs to
+    double selectivity = 3;      // Selectivity ratio of this block
 }
 
-// Cache replacement message
-message CacheReplacement {
-    repeated Metadata metadata = 1; // Keys to be cached in the next cycle
+// Statistics report message
+message StatisticsReport {
+    string server_address = 1;
+    repeated BlockAccessInfo block_stats = 2;
 }
 
 // Cache update message
 message UpdateCacheMeta {
     string src_node_addr = 1;
-    repeated Metadata metadata = 2; // Keys to be cached in the next cycle
+    repeated StreamMetadata add_stream_metadata = 2;
+    repeated StreamMetadata remove_stream_metadata = 3;
 }
 
 // Query request and response
@@ -51,6 +57,21 @@ message QueryResponse {
     string error = 3;            // Error message if query fails
 }
 
+// 新增：网络度量服务相关消息
+message NetworkMetricsRequest {
+    string data = 1;        // 测试数据
+    string from_node = 2;   // 发送方节点
+}
+
+message NetworkMetricsResponse {
+    bool success = 1;
+}
+
+// 新增：网络度量服务
+service NetworkMetricsService {
+    rpc MeasureNetwork(NetworkMetricsRequest) returns (NetworkMetricsResponse);
+}
+
 // APIs for the client to interact with the edge server
 service ClientToEdge {
     rpc Query(QueryRequest) returns (QueryResponse);
@@ -59,7 +80,6 @@ service ClientToEdge {
 // APIs for edge-to-edge metadata updates
 service EdgeToEdge {
     rpc UpdateMetadata(UpdateCacheMeta) returns (Empty);
-    rpc SubQuery(QueryRequest) returns (QueryResponse);
 }
 
 // APIs for edge-to-center communication
@@ -70,4 +90,18 @@ service EdgeToCenter {
 // APIs for center-to-edge communication
 service CenterToEdge {
     rpc ReplaceCache(CacheReplacement) returns (Empty);
+}
+
+enum BlockOperation {
+    ADD = 0;
+    REMOVE = 1;
+}
+
+message BlockOperationInfo {
+    string block_id = 1;
+    BlockOperation operation = 2;
+}
+
+message CacheReplacement {
+    repeated BlockOperationInfo block_operations = 1;
 }
