@@ -33,7 +33,6 @@ CenterServer::CenterServer() {
 void CenterServer::initializeNetworkMetrics() {
     std::cout << "Initializing network metrics..." << std::endl;
     
-    // 测量节点对之间的网络指标
     std::vector<std::string> all_nodes = edge_server_addresses_;
     all_nodes.push_back(center_addr_);  // 包含中心节点
     
@@ -141,19 +140,18 @@ grpc::Status CenterServer::ReportStatistics(grpc::ServerContext* context,
     std::lock_guard<std::mutex> lock(stats_mutex_);
     std::string server_address = request->server_address();
     
-    for (const auto& block_stat : request->BlockAccessInfo()) {
+    for (const auto& block_stat : request->block_stats()) {
         // 这个唯一标识使用字符串合理吗？
         std::string key = std::to_string(block_stat.datastream_unique_id()) + ":" + 
                          std::to_string(block_stat.block_id());
         
         auto& stats = current_period_stats_[key];
-        stats.node_access_counts[server_address]++;
-        stats.node_selectivities[server_address] += block_stat.selectivity();
+        stats[server_address].first++;
+        stats[server_address].second += block_stat.selectivity();
         
         std::cout << "Updated stats for block " << key 
                   << " from " << server_address
-                  << " (selectivity=" << block_stat.selectivity()
-                  << ", accesses=" << stats.node_access_counts[server_address] << ")" << std::endl;
+                  << " (selectivity=" << block_stat.selectivity() << ")" << std::endl;
     }
     
     return grpc::Status::OK;
@@ -178,7 +176,7 @@ void CenterServer::cacheReplacementLoop() {
     }
 }
 
-std::unordered_map<std::string, BlockStats> CenterServer::collectPeriodStats() {
+std::unordered_map<std::string, CenterServer::BlockStats> CenterServer::collectPeriodStats() {
     std::lock_guard<std::mutex> lock(stats_mutex_);
     auto period_stats = std::move(current_period_stats_);
     current_period_stats_.clear();
@@ -225,9 +223,10 @@ CenterServer::generateAllocationPlan() {
     std::unordered_map<std::string, std::unordered_set<std::string>> new_allocation_plan;
     int full_nodes = 0;
     
-    while (auto placement = replacement_queue_.getTopPlacementChoice() && 
-           full_nodes < edge_server_addresses_.size()) {
-        auto [block_key, node] = *placement;
+    while (auto placement = replacement_queue_.getTopPlacementChoice()) {
+        if (full_nodes >= edge_server_addresses_.size()) break;
+        
+        auto [block_key, node] = placement.value();
         
         if (checkNodeCapacity(node)) {
             new_allocation_plan[node].insert(block_key);
@@ -362,9 +361,10 @@ void CenterServer::updateNodeCapacity(
     node_capacity.used_capacity++;
 }
 
-void CenterServer::updateSchema(const std::string& stream_id, const Common::StreamMeta& meta) {
+void CenterServer::updateSchema(const std::string& datastream_id, const Common::StreamMeta& meta) {
     std::lock_guard<std::mutex> lock(schema_mutex_);
-    schema_[stream_id] = meta;
+    schema_[datastream_id] = meta;
+    unique_id_to_datastream_id_[meta.unique_id_] = datastream_id;
 }
 
 Common::StreamMeta CenterServer::getStreamMeta(const std::string& stream_id) {
@@ -374,6 +374,15 @@ Common::StreamMeta CenterServer::getStreamMeta(const std::string& stream_id) {
         throw std::runtime_error("Stream metadata not found: " + stream_id);
     }
     return it->second;
+}
+
+Common::StreamMeta CenterServer::getStreamMeta(const uint32_t unique_id) {
+    std::lock_guard<std::mutex> lock(schema_mutex_);
+    auto it = unique_id_to_datastream_id_.find(unique_id);
+    if (it == unique_id_to_datastream_id_.end()) {
+        throw std::runtime_error("Stream metadata not found: " + std::to_string(unique_id));
+    }
+    return getStreamMeta(it->second);
 }
 
 void CenterServer::Start(const std::string& server_address) {
@@ -386,9 +395,7 @@ void CenterServer::Start(const std::string& server_address) {
     server->Wait();
 }
 
-using WeightedStats = std::unordered_map<std::string, std::pair<double, double>>;
-
-WeightedStats CenterServer::calculateWeightedStats(const std::vector<BlockStats>& history) {
+CenterServer::WeightedStats CenterServer::calculateWeightedStats(const std::vector<BlockStats>& history) {
     WeightedStats node_weighted_sums;
     std::unordered_map<std::string, double> node_weight_sums;
     
@@ -470,7 +477,7 @@ CenterServer::calculateIncrementalChanges(
 
     // 计算每个节点的增量变化
     for (const auto& [node, new_blocks] : new_allocation_plan) {
-        const auto& current_blocks = node_block_index_[node];
+        const auto& current_blocks = node_block_allocation_map_[node];
         
         // 找出需要新增的块
         for (const auto& block : new_blocks) {
@@ -495,38 +502,69 @@ void CenterServer::executeNodeCacheUpdate(
     const std::vector<std::string>& blocks_to_add,
     const std::vector<std::string>& blocks_to_remove) {
     
-    auto stub = cachesystem::CacheReplacementService::NewStub(
+    auto stub = cloud_edge_cache::CenterToEdge::NewStub(
         grpc::CreateChannel(edge_server_address, grpc::InsecureChannelCredentials())
     );
 
-    cachesystem::CacheReplacementRequest request;
+    cloud_edge_cache::CacheReplacement request;
+    std::unordered_set<uint32_t> affected_streams;
     
-    // 添加需要新增的块
-    for (const auto& block : blocks_to_add) {
+    // 处理需要添加的块
+    for (const auto& block_key : blocks_to_add) {
+        // 解析 block_key (格式: "stream_id:block_id")
+        auto pos = block_key.find(':');
+        if (pos == std::string::npos) continue;
+        
+        uint32_t stream_id = std::stoul(block_key.substr(0, pos));
+        uint32_t block_id = std::stoul(block_key.substr(pos + 1));
+        
         auto* block_op = request.add_block_operations();
-        block_op->set_block_id(block);
-        block_op->set_operation(cachesystem::BlockOperation::ADD);
+        block_op->set_datastream_unique_id(stream_id);
+        block_op->set_block_id(block_id);
+        block_op->set_operation(cloud_edge_cache::BlockOperation::ADD);
+        
+        affected_streams.insert(stream_id);
     }
     
-    // 添加需要删除的块
-    for (const auto& block : blocks_to_remove) {
+    // 处理需要删除的块
+    for (const auto& block_key : blocks_to_remove) {
+        auto pos = block_key.find(':');
+        if (pos == std::string::npos) continue;
+        
+        uint32_t stream_id = std::stoul(block_key.substr(0, pos));
+        uint32_t block_id = std::stoul(block_key.substr(pos + 1));
+        
         auto* block_op = request.add_block_operations();
-        block_op->set_block_id(block);
-        block_op->set_operation(cachesystem::BlockOperation::REMOVE);
+        block_op->set_datastream_unique_id(stream_id);
+        block_op->set_block_id(block_id);
+        block_op->set_operation(cloud_edge_cache::BlockOperation::REMOVE);
+    }
+    
+    // 使用新的索引添加相关的流元数据
+    {
+        std::lock_guard<std::mutex> lock(schema_mutex_);
+        for (uint32_t unique_id : affected_streams) {
+            auto it_schema = getStreamMeta(unique_id);
+            auto* stream_meta = request.add_stream_metadata();
+            stream_meta->set_datastream_id(it_schema.datastream_id_);
+            stream_meta->set_unique_id(unique_id);
+            stream_meta->set_start_time(it_schema.start_time_);
+            stream_meta->set_time_range(it_schema.time_range_);
+        }
     }
 
     // 执行远程调用
-    cachesystem::CacheReplacementResponse response;
+    cloud_edge_cache::Empty response;
     grpc::ClientContext context;
     grpc::Status status = stub->ReplaceCache(&context, request, &response);
 
     if (status.ok()) {
         // 更新本地索引
         for (const auto& block : blocks_to_add) {
-            node_block_index_[edge_server_address].insert(block);
+            node_block_allocation_map_[edge_server_address].insert(block);
         }
         for (const auto& block : blocks_to_remove) {
-            node_block_index_[edge_server_address].erase(block);
+            node_block_allocation_map_[edge_server_address].erase(block);
         }
         
         std::cout << "Successfully updated cache on " << edge_server_address 

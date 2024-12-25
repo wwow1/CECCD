@@ -2,6 +2,7 @@
 #define CENTER_SERVER_H
 
 #include <grpcpp/grpcpp.h>
+#include "common.h"
 #include <grpcpp/server_builder.h>
 #include <iostream>
 #include <mutex>
@@ -20,6 +21,10 @@
 class CenterServer final : public cloud_edge_cache::EdgeToCenter::Service,
                            public cloud_edge_cache::CenterToEdge::Service {
 public:
+    // 简化 BlockStats 结构
+    using NodeStats = std::pair<int, double>;  // first: access_count, second: total_selectivity
+    using BlockStats = std::unordered_map<std::string, NodeStats>;  // node_address -> stats
+
     CenterServer();
 
     // Implementation of ReportStatistics API
@@ -32,11 +37,8 @@ public:
     // 新增：schema 管理方法
     void updateSchema(const std::string& stream_id, const Common::StreamMeta& meta);
     Common::StreamMeta getStreamMeta(const std::string& stream_id);
-
+    Common::StreamMeta getStreamMeta(const uint32_t unique_id);
 private:
-    // 简化 BlockStats 结构
-    using NodeStats = std::pair<int, double>;  // first: access_count, second: total_selectivity
-    using BlockStats = std::unordered_map<std::string, NodeStats>;  // node_address -> stats
 
     struct PredictionStats {
         std::chrono::system_clock::time_point timestamp;
@@ -50,6 +52,7 @@ private:
     uint64_t cache_period_;
     uint64_t block_size_;
     std::vector<std::string> replacement_keys_;         // Keys for cache replacement
+    std::string center_addr_;
 
     std::mutex stats_mutex_;
     std::chrono::milliseconds prediction_period_;
@@ -58,7 +61,7 @@ private:
     // 添加这些成员变量
     std::unordered_map<std::string, BlockStats> current_period_stats_;           // 当前周期的统计数据
     std::unordered_map<std::string, std::vector<BlockStats>> historical_stats_;  // 历史统计数据
-    std::unordered_map<std::string, PredictionStats> predictions_;               // 预测结���
+    std::unordered_map<std::string, PredictionStats> predictions_;               // 预测结果
     std::vector<std::string> edge_server_addresses_;                             // 边缘服务器地址列表
 
     // 新增：存储网络带宽和延迟的矩阵
@@ -94,10 +97,10 @@ private:
             std::vector<std::pair<std::string, double>>  // <节点ID, QCCV值>
         > block_candidates_;
 
+    public:
         // 添加新的私有方法
         void addNextBestCandidate(const std::string& block_key);
 
-    public:
         // 添加数据块的QCCV值及其对应的边缘节点
         void addBlockQCCV(const std::string& block_key, 
                          const std::string& node, 
@@ -132,10 +135,15 @@ private:
     // 新增：全局 schema 管理
     std::mutex schema_mutex_;
     std::unordered_map<std::string, Common::StreamMeta> schema_;
+    
+    // 新增：基于 unique_id 的 schema 索引
+    std::unordered_map<uint32_t, std::string> unique_id_to_datastream_id_;
 
     // 新增：当前周期的数据块分配记录
     // node_addr -> set<block_id>
     std::unordered_map<std::string, std::unordered_set<std::string>> node_block_allocation_map_;
+
+    using WeightedStats = std::unordered_map<std::string, std::pair<double, double>>;
 
     WeightedStats calculateWeightedStats(const std::vector<BlockStats>& history);
     
@@ -154,8 +162,16 @@ private:
         const std::vector<std::string>& blocks_to_add,
         const std::vector<std::string>& blocks_to_remove);
 
+    void executeCacheReplacement(
+        const std::unordered_map<std::string, std::unordered_set<std::string>>& new_allocation_plan);
+    
+    std::unordered_map<std::string, std::unordered_set<std::string>> generateAllocationPlan();
+
+    void calculateQCCVs();
     void cacheReplacementLoop();
-            // 新增：容量管理相关方法
+    void updateAccessHistory(const std::unordered_map<std::string, BlockStats>& period_stats);
+    std::unordered_map<std::string, BlockStats> collectPeriodStats();
+
     bool checkNodeCapacity(const std::string& node);
     void updateNodeCapacity(const std::string& node);
 };

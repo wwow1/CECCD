@@ -80,6 +80,7 @@ service ClientToEdge {
 // APIs for edge-to-edge metadata updates
 service EdgeToEdge {
     rpc UpdateMetadata(UpdateCacheMeta) returns (Empty);
+    rpc SubQuery(QueryRequest) returns (SubQueryResponse);
 }
 
 // APIs for edge-to-center communication
@@ -98,10 +99,24 @@ enum BlockOperation {
 }
 
 message BlockOperationInfo {
-    string block_id = 1;
-    BlockOperation operation = 2;
+    uint32 datastream_unique_id = 1;  // 添加数据流唯一标识
+    uint32 block_id = 2;              // 块ID
+    BlockOperation operation = 3;      // 操作类型
 }
 
 message CacheReplacement {
     repeated BlockOperationInfo block_operations = 1;
+    repeated StreamMetadata stream_metadata = 2;  // 添加相关的流元数据
+}
+
+// 添加新的消息类型
+message SubQueryResponse {
+    enum Status {
+        OK = 0;
+        FALSE_POSITIVE = 1;  // 表示布隆过滤器假阳性
+        ERROR = 2;          // 其他错误
+    }
+    Status status = 1;
+    QueryResponse result = 2;
+    string error_message = 3;
 }
