@@ -38,12 +38,6 @@ public:
                               const ::cloud_edge_cache::CacheReplacement* request,
                               cloud_edge_cache::Empty* response) override;
 
-    // // Implementation of SubQuery API
-    // grpc::Status SubQuery(grpc::ServerContext* context,
-    //                      const cloud_edge_cache::QueryRequest* request,
-    //                      cloud_edge_cache::QueryResponse* response) override;
-
-    // 客户端调用其他边缘服���器的方
     void PushMetadataUpdate(const std::vector<std::string>& keys, const std::string& target_server_address);
 
     void ReportStatistics(const std::vector<std::string>& keys);
@@ -59,9 +53,6 @@ public:
     void addStatsToReport(const uint32_t stream_unique_id, const uint32_t block_id, const double query_selectivity);
 
 private:
-    // void mergeQueryResults(cloud_edge_cache::QueryResponse* final_response, 
-    //                        const cloud_edge_cache::QueryResponse& node_response);
-
     void parseWhereClause(const hsql::Expr* expr, 
                           int64_t& start_timestamp, 
                           int64_t& end_timestamp);
@@ -129,6 +120,46 @@ private:
             , block_id(block)
             , stream_uniqueId(stream_id) {}
     };
+
+    // 新增的辅助函数声明
+    std::tuple<std::string, int64_t, int64_t> parseSQLQuery(const std::string& sql_query);
+    
+    std::vector<std::pair<QueryTask, std::future<cloud_edge_cache::SubQueryResponse>>> 
+    createQueryTasks(const std::string& sql_query, 
+                    const std::string& table_name,
+                    uint32_t start_block, 
+                    uint32_t end_block,
+                    uint32_t stream_uniqueId);
+    
+    void mergeQueryResults(cloud_edge_cache::QueryResponse* response,
+                          const std::vector<cloud_edge_cache::QueryResponse>& all_results);
+
+    std::vector<cloud_edge_cache::QueryResponse> processQueryResults(
+        std::vector<std::pair<QueryTask, std::future<cloud_edge_cache::SubQueryResponse>>>& query_tasks);
+
+    // ReplaceCache 相关的辅助函数
+    void updateSchemaInfo(const cloud_edge_cache::CacheReplacement* request);
+    
+    void ensureTableExists(const std::string& table_name,
+                          pqxx::connection& local_conn,
+                          pqxx::connection& center_conn);
+    
+    std::string buildCreateTableQuery(const std::string& table_name,
+                                    const pqxx::result& schema_info);
+    
+    void addDataBlock(const std::string& table_name,
+                     uint64_t block_start_time,
+                     uint64_t block_end_time,
+                     pqxx::connection& local_conn,
+                     pqxx::connection& center_conn);
+    
+    std::string buildInsertQuery(const std::string& table_name,
+                                const pqxx::result& rows);
+    
+    void removeDataBlock(const std::string& table_name,
+                        uint64_t block_start_time,
+                        uint64_t block_end_time,
+                        pqxx::connection& local_conn);
 };
 
 #endif // EDGE_SERVER_H
