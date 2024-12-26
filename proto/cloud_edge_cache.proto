@@ -30,8 +30,8 @@ message StatisticsReport {
 // Cache update message
 message UpdateCacheMeta {
     string src_node_addr = 1;
-    repeated StreamMetadata add_stream_metadata = 2;
-    repeated StreamMetadata remove_stream_metadata = 3;
+    repeated StreamMetadata stream_metadata = 2;
+    repeated BlockOperationInfo block_operations = 3;  // 添加块操作信息
 }
 
 // Query request and response

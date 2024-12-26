@@ -89,11 +89,7 @@ private:
 
 public:
     EdgeCacheIndex() {}
-
-    void updateIndex(const std::string& neighbor_nodeId, const cloud_edge_cache::Metadata& meta);
-
-    void removeFromIndex(const std::string& neighbor_nodeId, const cloud_edge_cache::Metadata& meta);
-
+    
     std::vector<std::string> queryIndex(const std::string& dataKey) const;
 
     tbb::concurrent_hash_map<uint32_t, std::string>& queryMainIndex(const std::string& datastream_id, const uint32_t start_blockId, 
@@ -101,6 +97,16 @@ public:
 
     void setNodeLatency(const std::string& nodeId, int64_t latency);
     void setLatencyThreshold(int64_t threshold);
+
+    void addBlock(const std::string& datastream_id, 
+                 uint32_t block_id,
+                 const std::string& node_id,
+                 uint32_t stream_unique_id);
+                 
+    void removeBlock(const std::string& datastream_id, 
+                    uint32_t block_id,
+                    const std::string& node_id,
+                    uint32_t stream_unique_id);
 };
 
 #endif // EDGE_CACHE_INDEX_HPP

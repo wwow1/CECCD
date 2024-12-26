@@ -138,7 +138,7 @@ private:
         std::vector<std::pair<QueryTask, std::future<cloud_edge_cache::SubQueryResponse>>>& query_tasks);
 
     // ReplaceCache 相关的辅助函数
-    void updateSchemaInfo(const cloud_edge_cache::CacheReplacement* request);
+    void updateSchemaInfo(const google::protobuf::RepeatedPtrField<cloud_edge_cache::StreamMetadata>& metadata);
     
     void ensureTableExists(const std::string& table_name,
                           pqxx::connection& local_conn,
@@ -160,6 +160,11 @@ private:
                         uint64_t block_start_time,
                         uint64_t block_end_time,
                         pqxx::connection& local_conn);
+
+    // 新增：处理块操作的函数声明
+    void updateBlockOperations(
+        const google::protobuf::RepeatedPtrField<cloud_edge_cache::BlockOperationInfo>& operations,
+        const std::string& src_node_addr);
 };
 
 #endif // EDGE_SERVER_H

@@ -366,36 +366,61 @@ void EdgeServer::parseWhereClause(const hsql::Expr* expr,
 // -------------------------------------------------------------------------------------
 
 grpc::Status EdgeServer::UpdateMetadata(grpc::ServerContext* context,
-                                        const cloud_edge_cache::UpdateCacheMeta* request,
-                                        cloud_edge_cache::Empty* response) {
+                                      const cloud_edge_cache::UpdateCacheMeta* request,
+                                      cloud_edge_cache::Empty* response) {
     std::string src_node_addr = request->src_node_addr();
     std::cout << "Received metadata update from " << src_node_addr << std::endl;
 
-    // Update local cache index with received metadata
-    for (const auto& meta : request->stream_metadata()) {
-        std::cout << "Updating metadata for stream: " << meta.datastream_id() << std::endl;
-        cache_index_->updateIndex(src_node_addr, meta);
-    }
+    // 更新 schema 信息
+    updateSchemaInfo(request->stream_metadata());
+    
+    // 处理块操作
+    updateBlockOperations(request->block_operations(), src_node_addr);
 
     return grpc::Status::OK;
 }
 
-// -------------------------------------------------------------------------------------
-
-// 更新schema信息
-void EdgeServer::updateSchemaInfo(const cloud_edge_cache::CacheReplacement* request) {
-    for (const auto& meta : request->stream_metadata()) {
+// 修改后的 updateSchemaInfo 函数
+void EdgeServer::updateSchemaInfo(const google::protobuf::RepeatedPtrField<cloud_edge_cache::StreamMetadata>& metadata) {
+    for (const auto& meta : metadata) {
         Common::StreamMeta stream_meta;
+        stream_meta.datastream_id_ = meta.datastream_id();
         stream_meta.unique_id_ = meta.unique_id();
         stream_meta.start_time_ = meta.start_time();
         stream_meta.time_range_ = meta.time_range();
-        stream_meta.datastream_id_ = meta.datastream_id();
         
         typename tbb::concurrent_hash_map<std::string, Common::StreamMeta>::accessor accessor;
         schema_.insert(accessor, meta.datastream_id());
         accessor->second = stream_meta;
     }
 }
+
+// 新增：处理块操作的函数
+void EdgeServer::updateBlockOperations(
+    const google::protobuf::RepeatedPtrField<cloud_edge_cache::BlockOperationInfo>& operations,
+    const std::string& src_node_addr) {
+    
+    for (const auto& op : operations) {
+        if (op.operation() == cloud_edge_cache::BlockOperation::ADD) {
+            cache_index_->addBlock(op.datastream_id(), 
+                                 op.block_id(),
+                                 src_node_addr,
+                                 op.datastream_unique_id());
+            std::cout << "Added block " << op.block_id() 
+                     << " for stream " << op.datastream_unique_id() 
+                     << " from node " << src_node_addr << std::endl;
+        } else if (op.operation() == cloud_edge_cache::BlockOperation::REMOVE) {
+            cache_index_->removeBlock(op.datastream_id(),
+                                    op.block_id(),
+                                    src_node_addr);
+            std::cout << "Removed block " << op.block_id() 
+                     << " for stream " << op.datastream_unique_id() 
+                     << " from node " << src_node_addr << std::endl;
+        }
+    }
+}
+
+// -------------------------------------------------------------------------------------
 
 // 确保表存在，如果不存在则创建
 void EdgeServer::ensureTableExists(const std::string& table_name, 
@@ -530,42 +555,30 @@ grpc::Status EdgeServer::ReplaceCache(grpc::ServerContext* context,
                                      const cloud_edge_cache::CacheReplacement* request,
                                      cloud_edge_cache::Empty* response) {
     try {
-        // 更新schema信息
-        updateSchemaInfo(request);
+        // 向邻居节点推送元数据更新，包括新的 schema 和块操作信息
+        cloud_edge_cache::UpdateCacheMeta update_meta;
+        update_meta.set_src_node_addr(server_address_);
         
-        auto& config = ConfigManager::getInstance();
-        std::string local_conn_str = config.getNodeDatabaseConfig(server_address_).getConnectionString();
-        std::string center_conn_str = config.getNodeDatabaseConfig(center_addr_).getConnectionString();
-        
-        pqxx::connection local_conn(local_conn_str);
-        pqxx::connection center_conn(center_conn_str);
-        
-        // 处理每个块操作
-        for (const auto& op : request->block_operations()) {
-            auto stream_meta = getStreamMeta(op.datastream_unique_id());
-            std::string table_name = stream_meta.datastream_id_;
-            
-            uint64_t block_start_time = stream_meta.start_time_ + op.block_id() * stream_meta.time_range_;
-            uint64_t block_end_time = block_start_time + stream_meta.time_range_;
-            
-            try {
-                if (op.operation() == cloud_edge_cache::BlockOperation::ADD) {
-                    ensureTableExists(table_name, local_conn, center_conn);
-                    addDataBlock(table_name, block_start_time, block_end_time, 
-                               local_conn, center_conn);
-                } else if (op.operation() == cloud_edge_cache::BlockOperation::REMOVE) {
-                    removeDataBlock(table_name, block_start_time, block_end_time, 
-                                  local_conn);
-                }
-            } catch (const std::exception& e) {
-                std::cerr << "Error processing block operation: " << e.what() << std::endl;
-                return grpc::Status(grpc::StatusCode::INTERNAL, 
-                                  "Failed to process block operation: " + std::string(e.what()));
-            }
+        // 添加 schema 元数据
+        for (const auto& meta : request->stream_metadata()) {
+            auto* stream_meta = update_meta.add_stream_metadata();
+            stream_meta->CopyFrom(meta);
         }
-        
+
+        // 添加块操作信息
+        for (const auto& op : request->block_operations()) {
+            auto* block_op = update_meta.add_block_operations();
+            block_op->set_datastream_unique_id(op.datastream_unique_id());
+            block_op->set_block_id(op.block_id());
+            block_op->set_operation(op.operation());
+        }
+
+        // 向所有邻居节点推送更新
+        for (const auto& neighbor : neighbor_addrs_) {
+            PushMetadataUpdate(update_meta, neighbor);
+        }
+
         return grpc::Status::OK;
-        
     } catch (const std::exception& e) {
         std::cerr << "Database connection error: " << e.what() << std::endl;
         return grpc::Status(grpc::StatusCode::INTERNAL, 
@@ -588,29 +601,15 @@ void EdgeServer::Start(const std::string& server_address) {
 
 // -------------------------------------------------------------------------------------
 
-void EdgeServer::PushMetadataUpdate(const std::vector<std::string>& keys, const std::string& target_server_address) {
-    // Create stub for the target edge server
+void EdgeServer::PushMetadataUpdate(const cloud_edge_cache::UpdateCacheMeta& update_meta,
+                                  const std::string& target_server_address) {
     auto channel = grpc::CreateChannel(target_server_address, grpc::InsecureChannelCredentials());
     auto stub = cloud_edge_cache::EdgeToEdge::NewStub(channel);
 
-    // Prepare request
-    cloud_edge_cache::UpdateCacheMeta request;
-    request.set_src_node_addr(ConfigManager::getInstance().getServerAddress());  // Set source address
-    
-    // Add metadata for each key
-    for (const auto& key : keys) {
-        auto metadata = cache_index_->getMetadata(key);
-        if (metadata) {
-            auto* stream_meta = request.add_stream_metadata();
-            stream_meta->CopyFrom(*metadata);
-        }
-    }
-
-    // Send request
     cloud_edge_cache::Empty response;
     grpc::ClientContext context;
     
-    auto status = stub->UpdateMetadata(&context, request, &response);
+    auto status = stub->UpdateMetadata(&context, update_meta, &response);
     
     if (status.ok()) {
         std::cout << "Successfully pushed metadata update to " << target_server_address << std::endl;
