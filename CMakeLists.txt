@@ -11,7 +11,7 @@ include_directories(
 )
 
 # Find required packages
-find_package(Protobuf REQUIRED)
+find_package(Protobuf CONFIG REQUIRED)
 find_package(gRPC CONFIG REQUIRED)
 find_package(TBB REQUIRED)
 
@@ -49,6 +49,7 @@ set(PROTO_HDRS
 set(COMMON_SOURCES
     src/config_manager.cpp
     src/edge_cache_index.cpp
+    src/roaring.c
 )
 
 # 添加 json 库
@@ -77,7 +78,7 @@ target_link_libraries(client
     TBB::tbb
     nlohmann_json::nlohmann_json
     pqxx
-    sql-parser
+    sqlparser
 )
 target_include_directories(client
     PUBLIC
@@ -93,17 +94,19 @@ target_include_directories(client
 # Edge server executable
 add_executable(edge_server
     src/edge_server.cpp
+    src/edge_server_main.cpp
     ${COMMON_SOURCES}
     ${PROTO_SRCS}
     ${PROTO_HDRS}
 )
+
 target_link_libraries(edge_server
     ${PROTOBUF_LIBRARIES}
     ${GRPC_LIBRARIES}
     gRPC::grpc++
     TBB::tbb
     pqxx
-    sql-parser
+    sqlparser
     nlohmann_json::nlohmann_json
 )
 target_include_directories(edge_server
@@ -118,29 +121,58 @@ target_include_directories(edge_server
 )
 
 # Center server executable
-# add_executable(center_server
-#     src/central_server.cpp
-#     ${COMMON_SOURCES}
-#     ${PROTO_SRCS}
-#     ${PROTO_HDRS}
-#     ${GRPC_SRCS}
-#     ${GRPC_HDRS}
-# )
-# target_link_libraries(center_server
-#     ${PROTOBUF_LIBRARIES}
-#     ${GRPC_LIBRARIES}
-#     gRPC::grpc++
-#     TBB::tbb
-# )
-# target_include_directories(center_server
-#     PUBLIC
-#         ${CMAKE_CURRENT_SOURCE_DIR}
-#         ${CMAKE_CURRENT_BINARY_DIR}
-#         ${PROTOBUF_INCLUDE_DIRS}
-#         ${GRPC_INCLUDE_DIRS}
-#     PRIVATE
-#         ${CMAKE_CURRENT_SOURCE_DIR}/include
-# )
+add_executable(center_server
+    src/center_server.cpp
+    src/center_server_main.cpp
+    ${COMMON_SOURCES}
+    ${PROTO_SRCS}
+    ${PROTO_HDRS}
+    ${GRPC_SRCS}
+    ${GRPC_HDRS}
+)
+target_link_libraries(center_server
+    ${PROTOBUF_LIBRARIES}
+    ${GRPC_LIBRARIES}
+    gRPC::grpc++
+    TBB::tbb
+    nlohmann_json::nlohmann_json
+    pqxx
+)
+target_include_directories(center_server
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_BINARY_DIR}
+        ${PROTOBUF_INCLUDE_DIRS}
+        ${GRPC_INCLUDE_DIRS}
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# 添加测试选项
+option(BUILD_TESTS "Build the test suite" ON)
+
+if(BUILD_TESTS)
+    # 添加 Google Test 子目录
+    add_subdirectory(third_party/googletest)
+
+    # 测试可执行文件
+    add_executable(center_server_tests
+        test/googletest/center_server_test.cc
+        src/center_server.cpp
+        ${COMMON_SOURCES}
+        # 其他测试文件
+    )
+
+    target_link_libraries(center_server_tests
+        gtest
+        gtest_main
+        client
+        # 其他需要的库
+    )
+
+    enable_testing()
+    add_test(NAME AllTests COMMAND center_server_tests)
+endif()
 
 # Installation rules
 install(TARGETS client
@@ -148,7 +180,7 @@ install(TARGETS client
     LIBRARY DESTINATION lib
 )
 
-install(TARGETS edge_server #center_server
+install(TARGETS edge_server center_server
     RUNTIME DESTINATION bin
 )
 
@@ -158,3 +190,19 @@ install(FILES
     include/common.h
     DESTINATION include/cloud_edge_cache
 )
+
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# 定义一个自定义命令来复制 config 目录
+add_custom_command(
+    OUTPUT ${CMAKE_BINARY_DIR}/config
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_SOURCE_DIR}/config ${CMAKE_BINARY_DIR}/config
+    COMMENT "Copying config directory to build directory"
+)
+
+# 定义一个自定义目标来触发复制命令
+add_custom_target(copy_config ALL DEPENDS ${CMAKE_BINARY_DIR}/config)
+
+# 确保在构建可执行文件之前执行复制
+add_dependencies(center_server copy_config)

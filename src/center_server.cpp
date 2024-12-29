@@ -3,15 +3,17 @@
 CenterServer::CenterServer() {
     auto& config = ConfigManager::getInstance();
     config.loadConfig("config/cluster_config.json");
-    
+    // 初始化 schema
+    initializeSchema();
+
     // 获取所有边缘节点地址
     for (const auto& node : config.getNodes()) {
         edge_server_addresses_.push_back(node.address);
         
         // 初始化节点容量
         NodeCapacity capacity;
-        block_size_ = config.getBlockSizeMB();
-        capacity.total_capacity = node.capacity_gb * 1024 / block_size_;  // 转换为字节
+        block_size_ = config.getBlockSizeMB() * 1024 * 1024;
+        capacity.total_capacity = node.capacity_gb * 1024 / config.getBlockSizeMB();  // 转换为block的个数
         capacity.used_capacity = 0;
         node_capacities_[node.address] = capacity;
     }
@@ -197,24 +199,34 @@ void CenterServer::updateAccessHistory(const std::unordered_map<std::string, Blo
     }
 }
 
+void CenterServer::processQCCVTask(const std::string& key, const std::vector<BlockStats>& history) {
+    auto weighted_stats = calculateWeightedStats(history);
+    auto node_qccv_values = calculateNodeQCCVs(key, weighted_stats);
+    for (const auto& [node, qccv] : node_qccv_values) {
+        replacement_queue_.addBlockQCCV(key, node, qccv);
+    }
+}
+
 void CenterServer::calculateQCCVs() {
     replacement_queue_.clear();
-    
+    ThreadPool pool(std::thread::hardware_concurrency());  // 创建线程池
+    std::vector<std::future<void>> futures;  // 用于存储任务的 future 对象
+
+    // std::cout << "historical_stats_ size: " << historical_stats_.size() << std::endl;
     for (const auto& [key, history] : historical_stats_) {
         if (history.empty()) continue;
         
-        // 计算加权访问统计
-        auto weighted_stats = calculateWeightedStats(history);
-        
-        // 计算数据块在每个节点的QCCV值
-        auto node_qccv_values = calculateNodeQCCVs(key, weighted_stats);
-        
-        // 将正QCCV值的节点添加到替换队列
-        for (const auto& [node, qccv] : node_qccv_values) {
-            replacement_queue_.addBlockQCCV(key, node, qccv);
-        }
+        // 使用 std::async 来获取 future 对象
+        futures.push_back(pool.enqueue([this, key, history]() {
+            processQCCVTask(key, history);
+        }));
     }
-    
+
+    // 等待所有任务完成
+    for (auto& future : futures) {
+        future.get();
+    }
+
     replacement_queue_.buildPriorityQueue();
 }
 
@@ -266,8 +278,8 @@ double CenterServer::getNetworkBandwidth(const std::string& from_node, const std
     if (network_metrics_.count(from_node) && network_metrics_[from_node].count(to_node)) {
         return network_metrics_[from_node][to_node].bandwidth;
     }
-    std::cerr << "Warning: No bandwidth data for " << from_node << " -> " << to_node 
-              << ", using default value" << std::endl;
+    // std::cerr << "Warning: No bandwidth data for " << from_node << " -> " << to_node 
+    //           << ", using default value" << std::endl;
     return 100.0;  // 默认值
 }
 
@@ -275,8 +287,8 @@ double CenterServer::getNetworkLatency(const std::string& from_node, const std::
     if (network_metrics_.count(from_node) && network_metrics_[from_node].count(to_node)) {
         return network_metrics_[from_node][to_node].latency;
     }
-    std::cerr << "Warning: No latency data for " << from_node << " -> " << to_node 
-              << ", using default value" << std::endl;
+    // std::cerr << "Warning: No latency data for " << from_node << " -> " << to_node 
+    //          << ", using default value" << std::endl;
     return 0.01;  // 默认值
 }
 
@@ -285,26 +297,31 @@ void CenterServer::CacheReplacementQueue::addBlockQCCV(
     const std::string& block_key, 
     const std::string& node, 
     double qccv) {
-    if (qccv > 0) {  // 只考虑正的QCCV值
-        block_candidates_[block_key].emplace_back(node, qccv);
+    if (qccv > 0) {  // Only consider positive QCCV values
+        tbb::concurrent_hash_map<std::string, std::vector<std::pair<std::string, double>>>::accessor accessor;
+        block_candidates_.insert(accessor, block_key);
+        accessor->second.emplace_back(node, qccv);
     }
 }
 
 void CenterServer::CacheReplacementQueue::addNextBestCandidate(const std::string& block_key) {
-    auto& candidates = block_candidates_[block_key];
-    if (!candidates.empty()) {
-        // 找出最大QCCV值的候选节点
-        auto max_candidate = std::max_element(
-            candidates.begin(),
-            candidates.end(),
-            [](const auto& a, const auto& b) { return a.second < b.second; }
-        );
-        
-        priority_queue_.push(std::make_tuple(
-            max_candidate->second,
-            block_key,
-            max_candidate->first
-        ));
+    tbb::concurrent_hash_map<std::string, std::vector<std::pair<std::string, double>>>::accessor accessor;
+    if (block_candidates_.find(accessor, block_key)) {
+        auto& candidates = accessor->second;
+        if (!candidates.empty()) {
+            // 找出最大QCCV值的候选节点
+            auto max_candidate = std::max_element(
+                candidates.begin(),
+                candidates.end(),
+                [](const auto& a, const auto& b) { return a.second < b.second; }
+            );
+            
+            priority_queue_.push(std::make_tuple(
+                max_candidate->second,
+                block_key,
+                max_candidate->first
+            ));
+        }
     }
 }
 
@@ -315,8 +332,8 @@ void CenterServer::CacheReplacementQueue::buildPriorityQueue() {
     }
     
     // 对每个数据块，将其最大QCCV值的候选节点加入优先队列
-    for (const auto& [block_key, candidates] : block_candidates_) {
-        addNextBestCandidate(block_key);
+    for (auto it = block_candidates_.begin(); it != block_candidates_.end(); ++it) {
+        addNextBestCandidate(it->first);
     }
 }
 
@@ -329,14 +346,17 @@ CenterServer::CacheReplacementQueue::getTopPlacementChoice() {
     auto [qccv, block_key, node] = priority_queue_.top();
     priority_queue_.pop();
     
-    // 从该数据块的候选列表中移除已使用的选项
-    auto& candidates = block_candidates_[block_key];
-    candidates.erase(
-        std::remove_if(candidates.begin(), candidates.end(),
-            [&node](const auto& candidate) { return candidate.first == node; }
-        ),
-        candidates.end()
-    );
+    // 使用 accessor 来访问 block_candidates_
+    tbb::concurrent_hash_map<std::string, std::vector<std::pair<std::string, double>>>::accessor accessor;
+    if (block_candidates_.find(accessor, block_key)) {
+        auto& candidates = accessor->second;
+        candidates.erase(
+            std::remove_if(candidates.begin(), candidates.end(),
+                [&node](const auto& candidate) { return candidate.first == node; }
+            ),
+            candidates.end()
+        );
+    }
     
     return std::make_pair(block_key, node);
 }
@@ -388,7 +408,10 @@ Common::StreamMeta CenterServer::getStreamMeta(const uint32_t unique_id) {
 void CenterServer::Start(const std::string& server_address) {
     grpc::ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-    builder.RegisterService(this); // Register both services
+
+    // Register the service implementations with the server builder
+    builder.RegisterService(static_cast<cloud_edge_cache::EdgeToCenter::Service*>(this));
+    builder.RegisterService(static_cast<cloud_edge_cache::CenterToEdge::Service*>(this));
 
     std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
     std::cout << "Center server is running on " << server_address << std::endl;
@@ -432,6 +455,7 @@ CenterServer::calculateNodeQCCVs(const std::string& block_key, const WeightedSta
     std::unordered_map<std::string, double> node_qccv_values;
 
     // 对每个可能的缓存节点 m 计算 QCCV
+    // std::cout << "weighted_stats size: " << weighted_stats.size() << std::endl;
     for (const auto& [cache_node, stats] : weighted_stats) {
         double qccv = 0.0;
         double Pm_i_t = stats.first;   // 访问频率
@@ -458,8 +482,8 @@ CenterServer::calculateNodeQCCVs(const std::string& block_key, const WeightedSta
         }
         
         node_qccv_values[cache_node] = qccv;
-        std::cout << "QCCV for block " << block_key << " on node " << cache_node 
-                  << ": " << qccv << std::endl;
+        // std::cout << "QCCV for block " << block_key << " on node " << cache_node 
+        //          << ": " << qccv << std::endl;
     }
     
     return node_qccv_values;
@@ -543,13 +567,13 @@ void CenterServer::executeNodeCacheUpdate(
     // 使用新的索引添加相关的流元数据
     {
         std::lock_guard<std::mutex> lock(schema_mutex_);
-        for (uint32_t unique_id : affected_streams) {
-            auto it_schema = getStreamMeta(unique_id);
+        // 遍历所有 schema 数据
+        for (const auto& [stream_id, meta] : schema_) {
             auto* stream_meta = request.add_stream_metadata();
-            stream_meta->set_datastream_id(it_schema.datastream_id_);
-            stream_meta->set_unique_id(unique_id);
-            stream_meta->set_start_time(it_schema.start_time_);
-            stream_meta->set_time_range(it_schema.time_range_);
+            stream_meta->set_datastream_id(meta.datastream_id_);
+            stream_meta->set_unique_id(meta.unique_id_);
+            stream_meta->set_start_time(meta.start_time_);
+            stream_meta->set_time_range(meta.time_range_);
         }
     }
 
@@ -577,18 +601,67 @@ void CenterServer::executeNodeCacheUpdate(
     }
 }
 
-int main(int argc, char* argv[]) {
-    if (argc != 3) {
-        std::cerr << "Usage: " << argv[0] << " <ip_address> <port>" << std::endl;
-        return 1;
+void CenterServer::initializeSchema() {
+    auto& db_config = ConfigManager::getInstance().getDatabaseConfig();
+    pqxx::connection conn(db_config.getConnectionString());
+    pqxx::work txn(conn);
+
+    // 获取所有表名
+    pqxx::result tables = txn.exec("SELECT table_name FROM information_schema.tables WHERE table_schema='public'");
+
+    for (const auto& row : tables) {
+        std::string table_name = row["table_name"].c_str();
+        
+        uint32_t unique_id = generateUniqueId(table_name);
+
+        // 使用 date 列名和采样来计算
+        pqxx::result sampled_rows = txn.exec(
+            "SELECT * FROM " + table_name + 
+            " TABLESAMPLE SYSTEM(1) ORDER BY date LIMIT 100"  // 采样1%的数据,最多100行
+        );
+
+        uint64_t start_time = 0;
+        size_t avg_row_size = 0;
+
+        if (!sampled_rows.empty()) {
+            // 获取开始时间
+            start_time = sampled_rows[0]["date"].as<uint64_t>();
+            
+            // 计算平均行大小
+            size_t total_size = 0;
+            for (const auto& row : sampled_rows) {
+                total_size += calculateRowSize(row);
+            }
+            avg_row_size = total_size / sampled_rows.size();
+        }
+
+        size_t rows_per_block = block_size_ * 1024 * 1024 / avg_row_size;
+        uint64_t time_range = calculateTimeRange(table_name, rows_per_block, txn);
+
+        Common::StreamMeta meta;
+        meta.unique_id_ = unique_id;
+        meta.start_time_ = start_time;
+        meta.time_range_ = time_range;
+        updateSchema(table_name, meta);
     }
+}
 
-    const std::string ip_address = argv[1];
-    const std::string port = argv[2];
-    const std::string server_address = ip_address + ":" + port;
-    
-    CenterServer center_server;
-    center_server.Start(server_address);
+uint32_t CenterServer::generateUniqueId(const std::string& table_name) {
+    static uint32_t last_id = 0;  // Static variable to keep track of the last assigned ID
+    return last_id++;  // Increment and return the last assigned ID
+}
 
-    return 0;
+size_t CenterServer::calculateRowSize(const pqxx::row& row) {
+    size_t total_size = 0;
+    for (const auto& field : row) {
+        total_size += field.size();  // Add the size of each field
+    }
+    return total_size;
+}
+
+uint64_t CenterServer::calculateTimeRange(const std::string& table_name, size_t rows_per_block, pqxx::work& txn) {
+    // 使用 date 列名
+    pqxx::result time_diff = txn.exec("SELECT date FROM " + table_name + " ORDER BY date LIMIT 2");
+    uint64_t time_difference = time_diff[1]["date"].as<uint64_t>() - time_diff[0]["date"].as<uint64_t>();
+    return time_difference * rows_per_block;
 }

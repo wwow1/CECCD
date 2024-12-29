@@ -79,6 +79,9 @@
     "typeindex": "cpp",
     "valarray": "cpp",
     "future": "cpp",
-    "shared_mutex": "cpp"
+    "shared_mutex": "cpp",
+    "roaring.c": "cpp",
+    "strstream": "cpp",
+    "*.ipp": "cpp"
   }
 }

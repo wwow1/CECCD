@@ -10,13 +10,18 @@
 #include <vector>
 #include <chrono>
 #include <thread>
-#include "cloud_edge_cache.grpc.pb.h"
 #include <unordered_map>
 #include <vector>
 #include <string>
 #include <queue>
 #include <optional>
 #include <algorithm>
+#include "config_manager.h"
+#include <tbb/concurrent_hash_map.h>
+#include <future>
+#include <pqxx/pqxx>
+#include "cloud_edge_cache.grpc.pb.h"
+#include "thread_pool.h"
 
 class CenterServer final : public cloud_edge_cache::EdgeToCenter::Service,
                            public cloud_edge_cache::CenterToEdge::Service {
@@ -24,7 +29,8 @@ public:
     // 简化 BlockStats 结构
     using NodeStats = std::pair<int, double>;  // first: access_count, second: total_selectivity
     using BlockStats = std::unordered_map<std::string, NodeStats>;  // node_address -> stats
-
+    using WeightedStats = std::unordered_map<std::string, std::pair<double, double>>;
+    
     CenterServer();
 
     // Implementation of ReportStatistics API
@@ -57,9 +63,15 @@ private:
     std::mutex stats_mutex_;
     std::chrono::milliseconds prediction_period_;
     std::chrono::system_clock::time_point current_period_start_;
-    
-    // 添加这些成员变量
-    std::unordered_map<std::string, BlockStats> current_period_stats_;           // 当前周期的统计数据
+
+    // 基于 unique_id 的 schema 索引
+    std::unordered_map<uint32_t, std::string> unique_id_to_datastream_id_;
+    // 全局 schema 管理
+    std::mutex schema_mutex_;
+    std::unordered_map<std::string, Common::StreamMeta> schema_;
+
+    // 当前周期的统计数据
+    std::unordered_map<std::string, BlockStats> current_period_stats_;
     std::unordered_map<std::string, std::vector<BlockStats>> historical_stats_;  // 历史统计数据
     std::unordered_map<std::string, PredictionStats> predictions_;               // 预测结果
     std::vector<std::string> edge_server_addresses_;                             // 边缘服务器地址列表
@@ -91,8 +103,8 @@ private:
             std::less<QueueElement>
         > priority_queue_;
         
-        // 每个数据块的候选缓存位置
-        std::unordered_map<
+        // Use TBB's concurrent hash map for thread safety
+        tbb::concurrent_hash_map<
             std::string, 
             std::vector<std::pair<std::string, double>>  // <节点ID, QCCV值>
         > block_candidates_;
@@ -132,18 +144,9 @@ private:
     CacheReplacementQueue replacement_queue_;
     std::unordered_map<std::string, NodeCapacity> node_capacities_;
 
-    // 新增：全局 schema 管理
-    std::mutex schema_mutex_;
-    std::unordered_map<std::string, Common::StreamMeta> schema_;
-    
-    // 新增：基于 unique_id 的 schema 索引
-    std::unordered_map<uint32_t, std::string> unique_id_to_datastream_id_;
-
     // 新增：当前周期的数据块分配记录
     // node_addr -> set<block_id>
     std::unordered_map<std::string, std::unordered_set<std::string>> node_block_allocation_map_;
-
-    using WeightedStats = std::unordered_map<std::string, std::pair<double, double>>;
 
     WeightedStats calculateWeightedStats(const std::vector<BlockStats>& history);
     
@@ -168,12 +171,22 @@ private:
     std::unordered_map<std::string, std::unordered_set<std::string>> generateAllocationPlan();
 
     void calculateQCCVs();
+    void processQCCVTask(const std::string& key, const std::vector<BlockStats>& history);
     void cacheReplacementLoop();
     void updateAccessHistory(const std::unordered_map<std::string, BlockStats>& period_stats);
     std::unordered_map<std::string, BlockStats> collectPeriodStats();
 
     bool checkNodeCapacity(const std::string& node);
     void updateNodeCapacity(const std::string& node);
+
+    // 新增：初始化 schema 相关方法
+    void initializeSchema();
+    uint32_t generateUniqueId(const std::string& table_name);
+    size_t calculateRowSize(const pqxx::row& row);
+    uint64_t calculateTimeRange(const std::string& table_name, 
+                              size_t rows_per_block, 
+                              pqxx::work& txn);
+
 };
 
 #endif // CENTER_SERVER_H

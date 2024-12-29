@@ -40,22 +40,7 @@ struct StreamMeta {
     uint32_t unique_id_;
     uint64_t start_time_;
     uint32_t time_range_;
-    uint32_t block_size_;
 };
-
-// struct BlockInfo {
-//     uint32_t block_id;
-//     uint32_t datastream_unique_id;
-//     int64_t start_timestamp;
-//     int64_t end_timestamp;
-    
-//     BlockInfo() = default;
-//     BlockInfo(uint32_t bid, uint32_t did, int64_t start, int64_t end)
-//         : block_id(bid)
-//         , datastream_id(did)
-//         , start_timestamp(start)
-//         , end_timestamp(end) {}
-// };
 
 class BaseIndex {
     public:

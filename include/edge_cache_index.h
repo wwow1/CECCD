@@ -76,7 +76,7 @@ class EdgeCacheIndex {
 private:
     // 节点ID -> [数据源ID -> 压缩位图]
     std::unordered_map<std::string, std::unique_ptr<Common::BaseIndex>> timeseries_main_index_;
-    // 添加一个枚举来指定索引类型
+    // 添加一个枚举来指定索引��型
     enum class IndexType {
         MIX_INDEX,
         BLOOM_FILTER
@@ -98,13 +98,11 @@ public:
     void setNodeLatency(const std::string& nodeId, int64_t latency);
     void setLatencyThreshold(int64_t threshold);
 
-    void addBlock(const std::string& datastream_id, 
-                 uint32_t block_id,
+    void addBlock(uint32_t block_id,
                  const std::string& node_id,
                  uint32_t stream_unique_id);
                  
-    void removeBlock(const std::string& datastream_id, 
-                    uint32_t block_id,
+    void removeBlock(uint32_t block_id,
                     const std::string& node_id,
                     uint32_t stream_unique_id);
 };

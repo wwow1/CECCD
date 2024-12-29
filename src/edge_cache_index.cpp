@@ -49,8 +49,7 @@ tbb::concurrent_hash_map<uint32_t, std::string>& EdgeCacheIndex::queryMainIndex(
     return results;
 }
 
-void EdgeCacheIndex::addBlock(const std::string& datastream_id, 
-                             uint32_t block_id,
+void EdgeCacheIndex::addBlock(uint32_t block_id,
                              const std::string& node_id,
                              uint32_t stream_unique_id) {
     // 如果该节点还没有索引，创建一个新的索引
@@ -63,10 +62,9 @@ void EdgeCacheIndex::addBlock(const std::string& datastream_id,
     local_index->add(stream_unique_id, block_id);
 }
 
-void EdgeCacheIndex::removeBlock(const std::string& datastream_id, 
-                               uint32_t block_id,
-                               const std::string& node_id,
-                               uint32_t stream_unique_id) {
+void EdgeCacheIndex::removeBlock(uint32_t block_id,
+                                 const std::string& node_id,
+                                 uint32_t stream_unique_id) {
     // 如果该节点的索引不存在，直接返回
     auto it = timeseries_main_index_.find(node_id);
     if (it == timeseries_main_index_.end()) {
