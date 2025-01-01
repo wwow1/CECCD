@@ -2,33 +2,16 @@
 EdgeServer::EdgeServer() {
     // 加载配置
     auto& config = ConfigManager::getInstance();
-    config.loadConfig("config/cluster_config.json");
     
     block_size_ = config.getBlockSizeMB() * 1024 * 1024;
-    // 获取中心节点地址并测量延迟
+    // 获取中心节点地址
     center_addr_ = config.getCenterAddress();
-    int64_t center_latency = measureLatency(center_addr_);
-    std::cout << "Center node latency: " << center_latency << "ms" << std::endl;
+    center_latency_ = measureLatency(center_addr_);
+    std::cout << "Center node latency: " << center_latency_ << "ms" << std::endl;
     
     // 初始化缓存索引
     cache_index_ = std::make_unique<EdgeCacheIndex>();
     cache_index_->setLatencyThreshold(config.getIndexLatencyThresholdMs());
-
-    // 初始化邻居节点地址，只保留延迟小于中心节点的邻居
-    for (const auto& node : config.getNodes()) {
-        int64_t node_latency = measureLatency(node.address);
-        std::cout << "Node " << node.address << " latency: " << node_latency << "ms" << std::endl;
-        
-        if (node_latency < center_latency) {
-            neighbor_addrs_.insert(node.address);
-            // 将节点延迟信息传递给缓存索引
-            cache_index_->setNodeLatency(node.address, node_latency);
-            std::cout << "Added " << node.address << " as neighbor" << std::endl;
-        }
-    }
-
-    // 启动统计信息上报线程
-    stats_report_thread_ = std::thread(&EdgeServer::statsReportLoop, this);
 }
 
 EdgeServer::~EdgeServer() {
@@ -41,7 +24,7 @@ EdgeServer::~EdgeServer() {
 
 void EdgeServer::statsReportLoop() {
     auto& config = ConfigManager::getInstance();
-    int64_t report_interval = config.getStatisticsReportIntervalMs();
+    int64_t report_interval = config.getStatisticsReportInterval();
     
     while (!should_stop_) {
         // 收集需要上报的统计信息
@@ -58,7 +41,7 @@ void EdgeServer::statsReportLoop() {
         }
         
         // 等待下一个上报周期
-        std::this_thread::sleep_for(std::chrono::milliseconds(report_interval));
+        std::this_thread::sleep_for(std::chrono::seconds(report_interval));
     }
 }
 
@@ -167,7 +150,7 @@ std::vector<cloud_edge_cache::QueryResponse> EdgeServer::processQueryResults(
                                                     task.sql_query,
                                                     task.block_id,
                                                     task.stream_uniqueId);
-                
+
                 if (retry_response.status() == cloud_edge_cache::SubQueryResponse_Status_OK 
                     && retry_response.has_result()) {
                     all_results.push_back(retry_response.result());
@@ -330,8 +313,8 @@ std::string EdgeServer::addBlockConditions(const std::string& original_sql,
     int64_t start_timestamp = stream_meta.start_time_ + block_id * stream_meta.time_range_;
     int64_t end_timestamp = stream_meta.start_time_ + (block_id + 1) * stream_meta.time_range_;
 
-    modified_sql << "date >= " << start_timestamp 
-                << " AND date < " << end_timestamp;
+    modified_sql << "time >= " << start_timestamp 
+                << " AND time < " << end_timestamp;
     
     return modified_sql.str();
 }
@@ -355,7 +338,7 @@ void EdgeServer::parseWhereClause(const hsql::Expr* expr,
         } else {
             // 处理比较操作符
             if (expr->expr && expr->expr->type == hsql::kExprColumnRef &&
-                std::string(expr->expr->name) == "date") {
+                std::string(expr->expr->name) == "time") {
                 if (expr->expr2 && expr->expr2->type == hsql::kExprLiteralInt) {
                     switch (expr->opType) {
                         case hsql::kOpGreaterEq:
@@ -517,8 +500,8 @@ void EdgeServer::addDataBlock(const std::string& table_name,
     
     std::string select_query = 
         "SELECT * FROM " + table_name + 
-        " WHERE date >= " + std::to_string(block_start_time) + 
-        " AND date < " + std::to_string(block_end_time);
+        " WHERE time >= " + std::to_string(block_start_time) + 
+        " AND time < " + std::to_string(block_end_time);
     
     pqxx::result rows = center_txn.exec(select_query);
     
@@ -568,8 +551,8 @@ void EdgeServer::removeDataBlock(const std::string& table_name,
     pqxx::work local_txn(local_conn);
     std::string delete_query = 
         "DELETE FROM " + table_name + 
-        " WHERE date >= " + std::to_string(block_start_time) + 
-        " AND date < " + std::to_string(block_end_time);
+        " WHERE time >= " + std::to_string(block_start_time) + 
+        " AND time < " + std::to_string(block_end_time);
     
     local_txn.exec(delete_query);
     local_txn.commit();
@@ -614,16 +597,19 @@ grpc::Status EdgeServer::ReplaceCache(grpc::ServerContext* context,
 // -------------------------------------------------------------------------------------
 
 void EdgeServer::Start(const std::string& server_address) {
+    server_address_ = server_address;
+    
+    // 向中心节点注册
+    registerWithCenter();
+    
+    // 启动服务器
     grpc::ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-    
     // 分别注册每个服务
     builder.RegisterService(static_cast<cloud_edge_cache::ClientToEdge::Service*>(this));
     builder.RegisterService(static_cast<cloud_edge_cache::EdgeToEdge::Service*>(this));
     builder.RegisterService(static_cast<cloud_edge_cache::CenterToEdge::Service*>(this));
-
     std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
-    server_address_ = server_address;
     std::cout << "Edge server is running on " << server_address << std::endl;
     server->Wait();
 }
@@ -801,4 +787,61 @@ cloud_edge_cache::SubQueryResponse EdgeServer::executeSubQuery(const std::string
     }
 
     return response;
+}
+
+void EdgeServer::registerWithCenter() {
+    auto channel = grpc::CreateChannel(center_addr_, grpc::InsecureChannelCredentials());
+    auto stub = cloud_edge_cache::EdgeToCenter::NewStub(channel);
+    
+    cloud_edge_cache::RegisterRequest request;
+    request.set_node_address(server_address_);
+    
+    cloud_edge_cache::Empty response;
+    grpc::ClientContext context;
+    
+    auto status = stub->Register(&context, request, &response);
+    if (!status.ok()) {
+        throw std::runtime_error("Failed to register with center node: " + status.error_message());
+    }
+    std::cout << "Successfully registered with center node" << std::endl;
+}
+
+// 实现更新集群节点信息的 gRPC 方法
+grpc::Status EdgeServer::UpdateClusterNodes(grpc::ServerContext* context,
+                                          const cloud_edge_cache::ClusterNodesUpdate* request,
+                                          cloud_edge_cache::Empty* response) {
+    std::set<std::string> new_nodes;
+    std::set<std::string> new_neighbors;
+
+    // 处理所有节点
+    for (const auto& node : request->nodes()) {
+        std::string node_addr = node.node_address();
+        new_nodes.insert(node_addr);
+
+        if (node_addr != server_address_) {  // 不处理自己
+            try {
+                int64_t node_latency = measureLatency(node_addr);
+                std::cout << "Node " << node_addr << " latency: " << node_latency << "ms" << std::endl;
+
+                // 如果节点延迟小于中心节点延迟，将其添加为邻居
+                if (node_latency < center_latency_) {
+                    new_neighbors.insert(node_addr);
+                    cache_index_->setNodeLatency(node_addr, node_latency);
+                    std::cout << "Added " << node_addr << " as neighbor" << std::endl;
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "Failed to measure latency to " << node_addr << ": " << e.what() << std::endl;
+            }
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(nodes_mutex_);
+        // 更新集群节点列表
+        cluster_nodes_ = std::move(new_nodes);
+        // 更新邻居节点列表
+        neighbor_addrs_ = std::move(new_neighbors);
+    }
+    
+    return grpc::Status::OK;
 }

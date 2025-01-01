@@ -33,12 +33,12 @@ public:
     }
 
     void loadConfig(const std::string& config_path);
-    const std::vector<NodeInfo>& getNodes() const { return nodes_; }
     const std::string& getCenterAddress() const { return center_address_; }
     const DatabaseConfig& getDatabaseConfig() const { return db_config_; }
     int64_t getIndexLatencyThresholdMs() const { return index_latency_threshold_ms_; }
-    int64_t getStatisticsReportIntervalMs() const { return statistics_report_interval_ms_; }
-    int64_t getPredictionPeriodMs() const { return prediction_period_ms_; }
+    int64_t getStatisticsReportInterval() const { return statistics_report_interval_s_; }
+    int64_t getPredictionPeriod() const { return prediction_period_s_; }
+    size_t getBlockSizeMB() const { return block_size_mb_; }
 
     DatabaseConfig getNodeDatabaseConfig(const std::string& node_address) const {
         DatabaseConfig node_db = db_config_;
@@ -51,23 +51,17 @@ public:
         return node_db;
     }
 
-    size_t getBlockSizeMB() const { return block_size_mb_; }
-    double getNodeCapacityGB(const std::string& node_id) const {
-        for (const auto& node : nodes_) {
-            if (node.id == node_id) return node.capacity_gb;
-        }
-        return 1.0;
-    }
+    double getEdgeCapacityGB() const { return edge_capacity_gb_; }
 
 private:
     ConfigManager() = default;
-    std::vector<NodeInfo> nodes_;
     std::string center_address_;
     DatabaseConfig db_config_;
     int64_t index_latency_threshold_ms_;
-    int64_t statistics_report_interval_ms_;
-    int64_t prediction_period_ms_;
+    int64_t statistics_report_interval_s_;
+    int64_t prediction_period_s_;
     size_t block_size_mb_;
+    double edge_capacity_gb_;
 };
 
 #endif // CONFIG_MANAGER_H 

@@ -53,6 +53,11 @@ public:
     // 添加新的方法用于收集需要上报的统计信息
     void addStatsToReport(const uint32_t stream_unique_id, const uint32_t block_id, const double query_selectivity);
 
+    // 实现更新集群节点信息的服务
+    grpc::Status UpdateClusterNodes(grpc::ServerContext* context,
+                                  const cloud_edge_cache::ClusterNodesUpdate* request,
+                                  cloud_edge_cache::Empty* response) override;
+
 private:
     void parseWhereClause(const hsql::Expr* expr, 
                           int64_t& start_timestamp, 
@@ -184,6 +189,13 @@ private:
         }
         return std::nullopt;
     }
+
+    std::mutex nodes_mutex_;
+    std::set<std::string> cluster_nodes_;  // 存储集群中的所有节点
+    int64_t center_latency_;
+
+    // 向中心节点注册
+    void registerWithCenter();
 };
 
 #endif // EDGE_SERVER_H

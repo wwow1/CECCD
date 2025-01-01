@@ -9,15 +9,6 @@ void ConfigManager::loadConfig(const std::string& config_path) {
     nlohmann::json j;
     file >> j;
 
-    // Load nodes
-    for (const auto& node : j["cluster"]["nodes"]) {
-        nodes_.push_back({
-            node["id"].get<std::string>(),
-            node["address"].get<std::string>(),
-            node["capacity_gb"].get<double>()
-        });
-    }
-
     // Load center node address
     center_address_ = j["cluster"]["center_node"]["address"].get<std::string>();
 
@@ -32,11 +23,14 @@ void ConfigManager::loadConfig(const std::string& config_path) {
     index_latency_threshold_ms_ = j["cluster"]["index_latency_threshold_ms"].get<int64_t>();
     
     // Load statistics report interval
-    statistics_report_interval_ms_ = j["cluster"]["statistics_report_interval_ms"].get<int64_t>();
+    statistics_report_interval_s_ = j["cluster"]["statistics_report_interval_s"].get<int64_t>();
     
     // Load prediction period
-    prediction_period_ms_ = j["cluster"]["prediction_period_ms"].get<int64_t>();
+    prediction_period_s_ = j["cluster"]["prediction_period_s"].get<int64_t>();
 
     // Load block size
     block_size_mb_ = j["cluster"]["block_size_mb"].get<size_t>();
+    
+    // Load edge capacity
+    edge_capacity_gb_ = j["cluster"]["edge_capacity_gb"].get<double>();
 } 

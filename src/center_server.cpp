@@ -2,40 +2,51 @@
 
 CenterServer::CenterServer() {
     auto& config = ConfigManager::getInstance();
-    config.loadConfig("config/cluster_config.json");
-    // 初始化 schema
-    initializeSchema();
+    block_size_ = config.getBlockSizeMB() * 1024 * 1024;
+    center_addr_ = config.getCenterAddress();
+    prediction_period_ = std::chrono::seconds(config.getPredictionPeriod());
+    current_period_start_ = std::chrono::system_clock::now();
+}
 
-    // 获取所有边缘节点地址
-    for (const auto& node : config.getNodes()) {
-        edge_server_addresses_.push_back(node.address);
+grpc::Status CenterServer::Register(grpc::ServerContext* context,
+                                  const cloud_edge_cache::RegisterRequest* request,
+                                  cloud_edge_cache::Empty* response) {
+    std::string node_addr = request->node_address();
+    auto& config = ConfigManager::getInstance();
+    
+    {
+        std::lock_guard<std::mutex> lock(nodes_mutex_);
+        // 添加到活跃节点列表
+        active_nodes_.insert(node_addr);
+        // 添加到边缘服务器地址列表
+        edge_server_addresses_.push_back(node_addr);
         
         // 初始化节点容量
         NodeCapacity capacity;
-        block_size_ = config.getBlockSizeMB() * 1024 * 1024;
-        capacity.total_capacity = node.capacity_gb * 1024 / config.getBlockSizeMB();  // 转换为block的个数
+        capacity.total_capacity = config.getEdgeCapacityGB() * 1024 / config.getBlockSizeMB();  // 转换为block的个数
         capacity.used_capacity = 0;
-        node_capacities_[node.address] = capacity;
+        node_capacities_[node_addr] = capacity;
+        
+        std::cout << "New edge node registered: " << node_addr << std::endl;
+        
+        // 重新初始化网络度量
+        initializeNetworkMetrics();
     }
     
-    prediction_period_ = std::chrono::milliseconds(
-        config.getPredictionPeriodMs()
-    );
-    current_period_start_ = std::chrono::system_clock::now();
+    // 通知所有节点更新集群信息
+    notifyAllNodes(node_addr);
     
-    center_addr_ = config.getCenterAddress();
-    
-    // 初始化网络度量
-    initializeNetworkMetrics();
-    
-    // 启动预测循环
-    std::thread(&CenterServer::cacheReplacementLoop, this).detach();
+    return grpc::Status::OK;
 }
 
 void CenterServer::initializeNetworkMetrics() {
     std::cout << "Initializing network metrics..." << std::endl;
     
-    std::vector<std::string> all_nodes = edge_server_addresses_;
+    std::vector<std::string> all_nodes;
+    {
+        std::lock_guard<std::mutex> lock(nodes_mutex_);
+        all_nodes = edge_server_addresses_;
+    }
     all_nodes.push_back(center_addr_);  // 包含中心节点
     
     for (const auto& from_node : all_nodes) {
@@ -278,8 +289,8 @@ double CenterServer::getNetworkBandwidth(const std::string& from_node, const std
     if (network_metrics_.count(from_node) && network_metrics_[from_node].count(to_node)) {
         return network_metrics_[from_node][to_node].bandwidth;
     }
-    // std::cerr << "Warning: No bandwidth data for " << from_node << " -> " << to_node 
-    //           << ", using default value" << std::endl;
+    std::cerr << "Warning: No bandwidth data for " << from_node << " -> " << to_node 
+              << ", using default value" << std::endl;
     return 100.0;  // 默认值
 }
 
@@ -287,8 +298,8 @@ double CenterServer::getNetworkLatency(const std::string& from_node, const std::
     if (network_metrics_.count(from_node) && network_metrics_[from_node].count(to_node)) {
         return network_metrics_[from_node][to_node].latency;
     }
-    // std::cerr << "Warning: No latency data for " << from_node << " -> " << to_node 
-    //          << ", using default value" << std::endl;
+    std::cerr << "Warning: No latency data for " << from_node << " -> " << to_node 
+              << ", using default value" << std::endl;
     return 0.01;  // 默认值
 }
 
@@ -406,6 +417,11 @@ Common::StreamMeta CenterServer::getStreamMeta(const uint32_t unique_id) {
 }
 
 void CenterServer::Start(const std::string& server_address) {
+    // 初始化 schema
+    initializeSchema();
+    // 启动预测循环
+    std::thread(&CenterServer::cacheReplacementLoop, this).detach();
+    
     grpc::ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
 
@@ -456,13 +472,14 @@ CenterServer::calculateNodeQCCVs(const std::string& block_key, const WeightedSta
 
     // 对每个可能的缓存节点 m 计算 QCCV
     // std::cout << "weighted_stats size: " << weighted_stats.size() << std::endl;
-    for (const auto& [cache_node, stats] : weighted_stats) {
+    for (const auto& cache_node : edge_server_addresses_) {
         double qccv = 0.0;
-        double Pm_i_t = stats.first;   // 访问频率
-        double Sm_i_t = stats.second;  // 选择率
         
         // 对每个可能的访问节点 n 计算传输时间差异
-        for (const auto& [access_node, _] : weighted_stats) {
+        for (const auto& [access_node, stats] : weighted_stats) {
+            double Pm_i_t = stats.first;   // 访问频率
+            double Sm_i_t = stats.second;  // 选择率
+
             // 计算查询结果大小 QD
             double QD_n_i_t = Sm_i_t * block_size_;  // QD = 选择率 * 原始数据块大小
             
@@ -603,6 +620,7 @@ void CenterServer::executeNodeCacheUpdate(
 
 void CenterServer::initializeSchema() {
     auto& db_config = ConfigManager::getInstance().getDatabaseConfig();
+    std::cout << "Database config: " << db_config.getConnectionString() << std::endl;
     pqxx::connection conn(db_config.getConnectionString());
     pqxx::work txn(conn);
 
@@ -614,10 +632,26 @@ void CenterServer::initializeSchema() {
         
         uint32_t unique_id = generateUniqueId(table_name);
 
-        // 使用 date 列名和采样来计算
+        // 首先获取表的列信息
+        pqxx::result columns = txn.exec(
+            "SELECT column_name, data_type "
+            "FROM information_schema.columns "
+            "WHERE table_name = '" + table_name + "' "
+            "ORDER BY ordinal_position"
+        );
+        
+        // 打印表头信息
+        std::cout << "\nTable: " << table_name << "\nColumns:\n";
+        for (const auto& col : columns) {
+            std::cout << "  " << col["column_name"].c_str() 
+                      << " (" << col["data_type"].c_str() << ")\n";
+        }
+        std::cout << std::endl;
+
+        // 使用 time 列名和采样来计算
         pqxx::result sampled_rows = txn.exec(
             "SELECT * FROM " + table_name + 
-            " TABLESAMPLE SYSTEM(1) ORDER BY date LIMIT 100"  // 采样1%的数据,最多100行
+            " TABLESAMPLE SYSTEM(1) ORDER BY time LIMIT 100"  // 采样1%的数据,最多100行
         );
 
         uint64_t start_time = 0;
@@ -625,7 +659,7 @@ void CenterServer::initializeSchema() {
 
         if (!sampled_rows.empty()) {
             // 获取开始时间
-            start_time = sampled_rows[0]["date"].as<uint64_t>();
+            start_time = sampled_rows[0]["time"].as<uint64_t>();
             
             // 计算平均行大小
             size_t total_size = 0;
@@ -643,6 +677,7 @@ void CenterServer::initializeSchema() {
         meta.start_time_ = start_time;
         meta.time_range_ = time_range;
         updateSchema(table_name, meta);
+        std::cout << "Updated schema for table " << table_name << " with unique_id " << unique_id << "start_time " << start_time << "time_range " << time_range << std::endl;
     }
 }
 
@@ -660,8 +695,35 @@ size_t CenterServer::calculateRowSize(const pqxx::row& row) {
 }
 
 uint64_t CenterServer::calculateTimeRange(const std::string& table_name, size_t rows_per_block, pqxx::work& txn) {
-    // 使用 date 列名
-    pqxx::result time_diff = txn.exec("SELECT date FROM " + table_name + " ORDER BY date LIMIT 2");
-    uint64_t time_difference = time_diff[1]["date"].as<uint64_t>() - time_diff[0]["date"].as<uint64_t>();
+    // 使用 time 列名
+    pqxx::result time_diff = txn.exec("SELECT time FROM " + table_name + " ORDER BY time LIMIT 2");
+    uint64_t time_difference = time_diff[1]["time"].as<uint64_t>() - time_diff[0]["time"].as<uint64_t>();
     return time_difference * rows_per_block;
+}
+
+void CenterServer::notifyAllNodes(const std::string& new_node) {
+    cloud_edge_cache::ClusterNodesUpdate update;
+    {
+        std::lock_guard<std::mutex> lock(nodes_mutex_);
+        for (const auto& node : active_nodes_) {
+            auto* node_info = update.add_nodes();
+            node_info->set_node_address(node);
+        }
+    }
+    
+    // 通知所有节点（包括新节点）
+    for (const auto& node : active_nodes_) {
+        auto channel = grpc::CreateChannel(node, grpc::InsecureChannelCredentials());
+        auto stub = cloud_edge_cache::CenterToEdge::NewStub(channel);
+        
+        grpc::ClientContext context;
+        cloud_edge_cache::Empty response;
+        
+        auto status = stub->UpdateClusterNodes(&context, update, &response);
+        if (!status.ok()) {
+            std::cerr << "Failed to notify node " << node << ": " << status.error_message() << std::endl;
+        } else {
+            std::cout << "Successfully notified node " << node << " of cluster update" << std::endl;
+        }
+    }
 }

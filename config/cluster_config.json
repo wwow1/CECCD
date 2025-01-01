@@ -1,25 +1,19 @@
 {
     "cluster": {
-        "nodes": [
-            {
-                "id": "node1",
-                "address": "localhost:5432",
-                "capacity_gb": 1
-            }
-        ],
         "center_node": {
             "address": "localhost:5432"
         },
-        "block_size_mb": 64,
+        "block_size_mb": 1,
+        "edge_capacity_gb": 1.0,
         "index_latency_threshold_ms": 30,
-        "statistics_report_interval_ms": 5000,
-        "prediction_period_ms": 30000
+        "statistics_report_interval_s": 5000,
+        "prediction_period_s": 300000
     },
     "database": {
         "host": "localhost",
         "port": "5432",
-        "dbname": "edge_cache_db",
+        "dbname": "postgres",
         "user": "postgres",
-        "password": "postgres"
+        "password": "password"
     }
-} 
+}

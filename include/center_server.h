@@ -44,6 +44,12 @@ public:
     void updateSchema(const std::string& stream_id, const Common::StreamMeta& meta);
     Common::StreamMeta getStreamMeta(const std::string& stream_id);
     Common::StreamMeta getStreamMeta(const uint32_t unique_id);
+
+    // 实现注册服务
+    grpc::Status Register(grpc::ServerContext* context,
+                         const cloud_edge_cache::RegisterRequest* request,
+                         cloud_edge_cache::Empty* response) override;
+
 private:
 
     struct PredictionStats {
@@ -186,6 +192,12 @@ private:
     uint64_t calculateTimeRange(const std::string& table_name, 
                               size_t rows_per_block, 
                               pqxx::work& txn);
+
+    std::mutex nodes_mutex_;
+    std::set<std::string> active_nodes_;  // 存储活跃节点列表
+    
+    // 通知所有节点更新集群信息
+    void notifyAllNodes(const std::string& new_node);
 
 };
 

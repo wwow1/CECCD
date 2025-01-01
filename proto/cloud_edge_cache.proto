@@ -85,11 +85,13 @@ service EdgeToEdge {
 
 // APIs for edge-to-center communication
 service EdgeToCenter {
+    rpc Register(RegisterRequest) returns (Empty);
     rpc ReportStatistics(StatisticsReport) returns (Empty);
 }
 
 // APIs for center-to-edge communication
 service CenterToEdge {
+    rpc UpdateClusterNodes(ClusterNodesUpdate) returns (Empty);
     rpc ReplaceCache(CacheReplacement) returns (Empty);
 }
 
@@ -119,4 +121,17 @@ message SubQueryResponse {
     Status status = 1;
     QueryResponse result = 2;
     string error_message = 3;
+}
+
+// 添加新的消息类型
+message RegisterRequest {
+    string node_address = 1;
+}
+
+message NodeInfo {
+    string node_address = 1;
+}
+
+message ClusterNodesUpdate {
+    repeated NodeInfo nodes = 1;
 }
