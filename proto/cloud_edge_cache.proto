@@ -57,19 +57,28 @@ message QueryResponse {
     string error = 3;            // Error message if query fails
 }
 
-// 新增：网络度量服务相关消息
-message NetworkMetricsRequest {
-    string data = 1;        // 测试数据
-    string from_node = 2;   // 发送方节点
+// 网络度量服务相关消息
+message ForwardNetworkMetricsRequest {
+    string from_node = 1;
+    string target_node = 2;  // 新增：目标节点
+}
+message ForwardNetworkMetricsResponse {
+    double bandwidth = 1;   // 带宽 (MB/s)
+    double latency = 2;     // 延迟 (秒)
 }
 
-message NetworkMetricsResponse {
-    bool success = 1;
+message ExecuteNetworkMetricsRequest {
+    string data = 1;
+}
+
+message ExecuteNetworkMetricsResponse {
+    string data = 1;
 }
 
 // 新增：网络度量服务
 service NetworkMetricsService {
-    rpc MeasureNetwork(NetworkMetricsRequest) returns (NetworkMetricsResponse);
+    rpc ForwardNetworkMeasurement(ForwardNetworkMetricsRequest) returns (ForwardNetworkMetricsResponse);
+    rpc ExecuteNetworkMeasurement(ExecuteNetworkMetricsRequest) returns (ExecuteNetworkMetricsResponse);
 }
 
 // APIs for the client to interact with the edge server

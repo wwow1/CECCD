@@ -1,7 +1,7 @@
 {
     "cluster": {
         "center_node": {
-            "address": "localhost:5432"
+            "address": "172.17.0.2:54320"
         },
         "block_size_mb": 1,
         "edge_capacity_gb": 1.0,

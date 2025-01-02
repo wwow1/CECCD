@@ -21,7 +21,8 @@
 
 class EdgeServer final : public cloud_edge_cache::ClientToEdge::Service,
                          public cloud_edge_cache::EdgeToEdge::Service,
-                         public cloud_edge_cache::CenterToEdge::Service {
+                         public cloud_edge_cache::CenterToEdge::Service,
+                         public cloud_edge_cache::NetworkMetricsService::Service {
 public:
     EdgeServer();
     ~EdgeServer();
@@ -58,6 +59,12 @@ public:
                                   const cloud_edge_cache::ClusterNodesUpdate* request,
                                   cloud_edge_cache::Empty* response) override;
 
+    grpc::Status ForwardNetworkMeasurement(grpc::ServerContext* context,
+                                           const cloud_edge_cache::ForwardNetworkMetricsRequest* request,
+                                           cloud_edge_cache::ForwardNetworkMetricsResponse* response) override;
+    grpc::Status ExecuteNetworkMeasurement(grpc::ServerContext* context,
+                                           const cloud_edge_cache::ExecuteNetworkMetricsRequest* request,
+                                           cloud_edge_cache::ExecuteNetworkMetricsResponse* response) override;
 private:
     void parseWhereClause(const hsql::Expr* expr, 
                           int64_t& start_timestamp, 

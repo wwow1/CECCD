@@ -43,108 +43,43 @@ void CenterServer::initializeNetworkMetrics() {
     std::cout << "Initializing network metrics..." << std::endl;
     
     std::vector<std::string> all_nodes;
-    {
-        std::lock_guard<std::mutex> lock(nodes_mutex_);
-        all_nodes = edge_server_addresses_;
-    }
+    all_nodes = edge_server_addresses_;
     all_nodes.push_back(center_addr_);  // 包含中心节点
     
     for (const auto& from_node : all_nodes) {
         for (const auto& to_node : all_nodes) {
             if (from_node != to_node) {
-                measureNetworkMetrics(from_node, to_node);
+                auto channel = grpc::CreateChannel(from_node, grpc::InsecureChannelCredentials());
+                auto stub = cloud_edge_cache::NetworkMetricsService::NewStub(channel);
+                
+                // 等待源节点通道就绪
+                if (!channel->WaitForConnected(gpr_time_add(
+                        gpr_now(GPR_CLOCK_REALTIME),
+                        gpr_time_from_seconds(5, GPR_TIMESPAN)))) {
+                    std::cerr << "Failed to connect to source node " << from_node << std::endl;
+                    return;
+                }
+                
+                grpc::ClientContext context;
+                cloud_edge_cache::ForwardNetworkMetricsRequest request;
+                cloud_edge_cache::ForwardNetworkMetricsResponse response;
+                request.set_from_node(from_node);
+                request.set_target_node(to_node);
+                stub->ForwardNetworkMeasurement(&context, request, &response);
+
+                NetworkMetrics metrics;
+                metrics.bandwidth = response.bandwidth();
+                metrics.latency = response.latency();
+                network_metrics_[from_node][to_node] = metrics;
+                
+                std::cout << "\nFinal network metrics from " << from_node << " to " << to_node << ":\n"
+                        << "  Average bandwidth: " << metrics.bandwidth << " MB/s\n"
+                        << "  Average latency: " << metrics.latency * 1000 << " ms\n" << std::endl;
             }
         }
     }
     
     std::cout << "Network metrics initialization completed" << std::endl;
-}
-
-void CenterServer::measureNetworkMetrics(const std::string& from_node, const std::string& to_node) {
-    static constexpr int SAMPLE_SIZE = 1024 * 1024;  // 1MB 测试数据
-    static constexpr int REPEAT_COUNT = 3;           // 测量次数
-    static constexpr int COOLDOWN_MS = 100;         // 测量间隔时间
-    
-    double total_bandwidth = 0.0;
-    double total_latency = 0.0;
-    int successful_measurements = 0;
-    
-    // 创建 gRPC 通道和存根
-    auto channel = grpc::CreateChannel(to_node, grpc::InsecureChannelCredentials());
-    auto stub = cloud_edge_cache::NetworkMetricsService::NewStub(channel);
-    
-    for (int i = 0; i < REPEAT_COUNT; ++i) {
-        grpc::ClientContext context;
-        cloud_edge_cache::NetworkMetricsRequest request;
-        cloud_edge_cache::NetworkMetricsResponse response;
-        request.set_from_node(from_node);
-        
-        try {
-            // 1. 测量基础延迟 (传播延迟 + 处理延迟)
-            request.set_data("ping");
-            auto start_base = std::chrono::high_resolution_clock::now();
-            auto status = stub->MeasureNetwork(&context, request, &response);
-            auto end_base = std::chrono::high_resolution_clock::now();
-            
-            if (!status.ok()) {
-                throw std::runtime_error(status.error_message());
-            }
-            
-            double base_latency = std::chrono::duration<double>(end_base - start_base).count();
-            
-            // 2. 测量总延迟 (包含传输延迟)
-            grpc::ClientContext data_context;
-            request.set_data(std::string(SAMPLE_SIZE, 'X'));
-            auto start_total = std::chrono::high_resolution_clock::now();
-            status = stub->MeasureNetwork(&data_context, request, &response);
-            auto end_total = std::chrono::high_resolution_clock::now();
-            
-            if (!status.ok()) {
-                throw std::runtime_error(status.error_message());
-            }
-            
-            // 3. 计算各项指标
-            double total_latency = std::chrono::duration<double>(end_total - start_total).count();
-            double transmission_delay = total_latency - base_latency;
-            double bandwidth = static_cast<double>(SAMPLE_SIZE) / (1024 * 1024 * transmission_delay); // MB/s
-            
-            // 4. 累加结果
-            total_bandwidth += bandwidth;
-            total_latency += total_latency;
-            ++successful_measurements;
-            
-            // 输出每次测量的详细信息
-            std::cout << "Measurement " << (i + 1) << " from " << from_node << " to " << to_node << ":\n"
-                      << "  Base latency: " << base_latency * 1000 << " ms\n"
-                      << "  Total latency: " << total_latency * 1000 << " ms\n"
-                      << "  Transmission delay: " << transmission_delay * 1000 << " ms\n"
-                      << "  Bandwidth: " << bandwidth << " MB/s\n" << std::endl;
-            
-        } catch (const std::exception& e) {
-            std::cerr << "Error in measurement " << (i + 1) << " between " << from_node 
-                      << " and " << to_node << ": " << e.what() << std::endl;
-        }
-        
-        // 测量间隔
-        std::this_thread::sleep_for(std::chrono::milliseconds(COOLDOWN_MS));
-    }
-    
-    // 存储最终结果
-    if (successful_measurements > 0) {
-        NetworkMetrics metrics;
-        metrics.bandwidth = total_bandwidth / successful_measurements;
-        metrics.latency = total_latency / successful_measurements;
-        network_metrics_[from_node][to_node] = metrics;
-        
-        std::cout << "\nFinal network metrics from " << from_node << " to " << to_node << ":\n"
-                  << "  Average bandwidth: " << metrics.bandwidth << " MB/s\n"
-                  << "  Average latency: " << metrics.latency * 1000 << " ms\n"
-                  << "  Successful measurements: " << successful_measurements 
-                  << "/" << REPEAT_COUNT << std::endl;
-    } else {
-        std::cerr << "Warning: No successful measurements between " << from_node 
-                  << " and " << to_node << std::endl;
-    }
 }
 
 grpc::Status CenterServer::ReportStatistics(grpc::ServerContext* context,
@@ -428,6 +363,7 @@ void CenterServer::Start(const std::string& server_address) {
     // Register the service implementations with the server builder
     builder.RegisterService(static_cast<cloud_edge_cache::EdgeToCenter::Service*>(this));
     builder.RegisterService(static_cast<cloud_edge_cache::CenterToEdge::Service*>(this));
+    builder.RegisterService(static_cast<cloud_edge_cache::NetworkMetricsService::Service*>(this));
 
     std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
     std::cout << "Center server is running on " << server_address << std::endl;
@@ -677,7 +613,7 @@ void CenterServer::initializeSchema() {
         meta.start_time_ = start_time;
         meta.time_range_ = time_range;
         updateSchema(table_name, meta);
-        std::cout << "Updated schema for table " << table_name << " with unique_id " << unique_id << "start_time " << start_time << "time_range " << time_range << std::endl;
+        std::cout << "Updated schema for table " << table_name << " with unique_id " << unique_id << " start_time " << start_time << "time_range " << time_range << std::endl;
     }
 }
 
@@ -726,4 +662,100 @@ void CenterServer::notifyAllNodes(const std::string& new_node) {
             std::cout << "Successfully notified node " << node << " of cluster update" << std::endl;
         }
     }
+}
+
+
+// 处理转发的网络度量请求
+grpc::Status CenterServer::ForwardNetworkMeasurement(grpc::ServerContext* context,
+                                                 const cloud_edge_cache::ForwardNetworkMetricsRequest* request,
+                                                 cloud_edge_cache::ForwardNetworkMetricsResponse* response) {
+    const std::string& target_node = request->target_node();
+    static constexpr int SAMPLE_SIZE = 1024 * 1024;  // 1MB 测试数据
+    static constexpr int REPEAT_COUNT = 3;           // 测量次数
+    static constexpr int COOLDOWN_MS = 100;         // 测量间隔时间
+    
+    double total_bandwidth = 0.0;
+    double total_latency = 0.0;
+    int successful_measurements = 0;
+    
+    // 创建到目标节点的通道
+    auto channel = grpc::CreateChannel(target_node, grpc::InsecureChannelCredentials());
+    auto stub = cloud_edge_cache::NetworkMetricsService::NewStub(channel);
+    
+    for (int i = 0; i < REPEAT_COUNT; ++i) {
+        try {
+            // 等待目标节点通道就绪
+            if (!channel->WaitForConnected(gpr_time_add(
+                    gpr_now(GPR_CLOCK_REALTIME),
+                    gpr_time_from_seconds(5, GPR_TIMESPAN)))) {
+                std::cerr << "Failed to connect to target node " << target_node << std::endl;
+                return grpc::Status(grpc::StatusCode::UNAVAILABLE, "Failed to connect to target node");
+            }
+
+            // 1. 测量基础延迟
+            grpc::ClientContext base_context;
+            cloud_edge_cache::ExecuteNetworkMetricsRequest base_request;
+            cloud_edge_cache::ExecuteNetworkMetricsResponse base_response;
+            auto start_base = std::chrono::high_resolution_clock::now();
+            auto status = stub->ExecuteNetworkMeasurement(&base_context, base_request, &base_response);
+            auto end_base = std::chrono::high_resolution_clock::now();
+            
+            if (!status.ok()) {
+                throw std::runtime_error(status.error_message());
+            }
+            
+            double base_latency = std::chrono::duration<double>(end_base - start_base).count();
+            
+            // 2. 测量总延迟 (包含传输延迟)
+            std::this_thread::sleep_for(std::chrono::milliseconds(COOLDOWN_MS));
+            
+            grpc::ClientContext data_context;
+            cloud_edge_cache::ExecuteNetworkMetricsRequest data_request;
+            cloud_edge_cache::ExecuteNetworkMetricsResponse data_response;
+            data_request.set_data(std::string(SAMPLE_SIZE, 'a'));
+            auto start_total = std::chrono::high_resolution_clock::now();
+            status = stub->ExecuteNetworkMeasurement(&data_context, data_request, &data_response);
+            auto end_total = std::chrono::high_resolution_clock::now();
+            if (!status.ok()) {
+                throw std::runtime_error(status.error_message());
+            }
+
+            // 3. 计算各项指标
+            double total_time = std::chrono::duration<double>(end_total - start_total).count();
+            double transmission_delay = total_time - base_latency;
+            double bandwidth = static_cast<double>(SAMPLE_SIZE) / (1024 * 1024 * transmission_delay); // MB/s
+            
+            // 4. 累加结果
+            total_bandwidth += bandwidth;
+            total_latency += base_latency;
+            ++successful_measurements;
+            
+        } catch (const std::exception& e) {
+            std::cerr << "Error in measurement to " << target_node 
+                      << ": " << e.what() 
+                      << "\nChannel state: " << channel->GetState(true) << std::endl;
+        }
+        
+        // 测量间隔
+        std::this_thread::sleep_for(std::chrono::milliseconds(COOLDOWN_MS));
+    }
+    
+    // 设置响应结果
+    if (successful_measurements > 0) {
+        response->set_bandwidth(total_bandwidth / successful_measurements);
+        response->set_latency(total_latency / successful_measurements);
+        return grpc::Status::OK;
+    } else {
+        return grpc::Status(grpc::StatusCode::INTERNAL, 
+                          "No successful measurements completed");
+    }
+}
+
+// 直接执行网络度量请求
+grpc::Status CenterServer::ExecuteNetworkMeasurement(grpc::ServerContext* context,
+                                                 const cloud_edge_cache::ExecuteNetworkMetricsRequest* request,
+                                                 cloud_edge_cache::ExecuteNetworkMetricsResponse* response) {
+    // 简单地返回接收到的数据，用于测量网络延迟和带宽
+    response->set_data(request->data());
+    return grpc::Status::OK;
 }

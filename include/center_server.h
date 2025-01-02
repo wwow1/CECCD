@@ -24,7 +24,8 @@
 #include "thread_pool.h"
 
 class CenterServer final : public cloud_edge_cache::EdgeToCenter::Service,
-                           public cloud_edge_cache::CenterToEdge::Service {
+                           public cloud_edge_cache::CenterToEdge::Service,
+                           public cloud_edge_cache::NetworkMetricsService::Service {
 public:
     // 简化 BlockStats 结构
     using NodeStats = std::pair<int, double>;  // first: access_count, second: total_selectivity
@@ -49,6 +50,15 @@ public:
     grpc::Status Register(grpc::ServerContext* context,
                          const cloud_edge_cache::RegisterRequest* request,
                          cloud_edge_cache::Empty* response) override;
+
+    // 修改返回类型为 grpc::Status
+    grpc::Status ForwardNetworkMeasurement(grpc::ServerContext* context,
+                                         const cloud_edge_cache::ForwardNetworkMetricsRequest* request,
+                                         cloud_edge_cache::ForwardNetworkMetricsResponse* response) override;
+
+    grpc::Status ExecuteNetworkMeasurement(grpc::ServerContext* context,
+                                         const cloud_edge_cache::ExecuteNetworkMetricsRequest* request,
+                                         cloud_edge_cache::ExecuteNetworkMetricsResponse* response) override;
 
 private:
 
@@ -91,8 +101,6 @@ private:
     
     // 新增：初始化网络度量的方法
     void initializeNetworkMetrics();
-    void measureNetworkMetrics(const std::string& from_node, const std::string& to_node);
-
     double getNetworkBandwidth(const std::string& from_node, const std::string& to_node);
     double getNetworkLatency(const std::string& from_node, const std::string& to_node);
 
