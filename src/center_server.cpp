@@ -29,10 +29,9 @@ grpc::Status CenterServer::Register(grpc::ServerContext* context,
         
         std::cout << "New edge node registered: " << node_addr << std::endl;
         
-        // 重新初始化网络度量
-        initializeNetworkMetrics();
     }
-    
+    // 重新初始化网络度量
+    initializeNetworkMetrics();
     // 通知所有节点更新集群信息
     notifyAllNodes(node_addr);
     
@@ -41,41 +40,43 @@ grpc::Status CenterServer::Register(grpc::ServerContext* context,
 
 void CenterServer::initializeNetworkMetrics() {
     std::cout << "Initializing network metrics..." << std::endl;
-    
+    std::lock_guard<std::mutex> lock(nodes_mutex_);
     std::vector<std::string> all_nodes;
     all_nodes = edge_server_addresses_;
     all_nodes.push_back(center_addr_);  // 包含中心节点
     
-    for (const auto& from_node : all_nodes) {
-        for (const auto& to_node : all_nodes) {
-            if (from_node != to_node) {
-                auto channel = grpc::CreateChannel(from_node, grpc::InsecureChannelCredentials());
-                auto stub = cloud_edge_cache::NetworkMetricsService::NewStub(channel);
-                
-                // 等待源节点通道就绪
-                if (!channel->WaitForConnected(gpr_time_add(
-                        gpr_now(GPR_CLOCK_REALTIME),
-                        gpr_time_from_seconds(5, GPR_TIMESPAN)))) {
-                    std::cerr << "Failed to connect to source node " << from_node << std::endl;
-                    return;
-                }
-                
-                grpc::ClientContext context;
-                cloud_edge_cache::ForwardNetworkMetricsRequest request;
-                cloud_edge_cache::ForwardNetworkMetricsResponse response;
-                request.set_from_node(from_node);
-                request.set_target_node(to_node);
-                stub->ForwardNetworkMeasurement(&context, request, &response);
-
-                NetworkMetrics metrics;
-                metrics.bandwidth = response.bandwidth();
-                metrics.latency = response.latency();
-                network_metrics_[from_node][to_node] = metrics;
-                
-                std::cout << "\nFinal network metrics from " << from_node << " to " << to_node << ":\n"
-                        << "  Average bandwidth: " << metrics.bandwidth << " MB/s\n"
-                        << "  Average latency: " << metrics.latency * 1000 << " ms\n" << std::endl;
+    for (uint32_t i = 0; i < all_nodes.size(); i++) {
+        for (uint32_t j = i + 1; j < all_nodes.size(); j++) {
+            auto& from_node = all_nodes[i];
+            auto& to_node = all_nodes[j];
+            std::cout << "from_node: " << from_node << " to_node: " << to_node << std::endl;
+            auto channel = grpc::CreateChannel(from_node, grpc::InsecureChannelCredentials());
+            auto stub = cloud_edge_cache::NetworkMetricsService::NewStub(channel);
+            
+            // 等待源节点通道就绪
+            if (!channel->WaitForConnected(gpr_time_add(
+                    gpr_now(GPR_CLOCK_REALTIME),
+                    gpr_time_from_seconds(5, GPR_TIMESPAN)))) {
+                std::cerr << "Failed to connect to source node " << from_node << std::endl;
+                return;
             }
+            
+            grpc::ClientContext context;
+            cloud_edge_cache::ForwardNetworkMetricsRequest request;
+            cloud_edge_cache::ForwardNetworkMetricsResponse response;
+            request.set_from_node(from_node);
+            request.set_target_node(to_node);
+            stub->ForwardNetworkMeasurement(&context, request, &response);
+
+            NetworkMetrics metrics;
+            metrics.bandwidth = response.bandwidth();
+            metrics.latency = response.latency();
+            network_metrics_[from_node][to_node] = metrics;
+            network_metrics_[to_node][from_node] = metrics;
+            
+            std::cout << "\nFinal network metrics from " << from_node << " to " << to_node << ":\n"
+                    << "  Average bandwidth: " << metrics.bandwidth << " MB/s\n"
+                    << "  Average latency: " << metrics.latency * 1000 << " ms\n" << std::endl;
         }
     }
     
@@ -516,19 +517,6 @@ void CenterServer::executeNodeCacheUpdate(
         block_op->set_block_id(block_id);
         block_op->set_operation(cloud_edge_cache::BlockOperation::REMOVE);
     }
-    
-    // 使用新的索引添加相关的流元数据
-    {
-        std::lock_guard<std::mutex> lock(schema_mutex_);
-        // 遍历所有 schema 数据
-        for (const auto& [stream_id, meta] : schema_) {
-            auto* stream_meta = request.add_stream_metadata();
-            stream_meta->set_datastream_id(meta.datastream_id_);
-            stream_meta->set_unique_id(meta.unique_id_);
-            stream_meta->set_start_time(meta.start_time_);
-            stream_meta->set_time_range(meta.time_range_);
-        }
-    }
 
     // 执行远程调用
     cloud_edge_cache::Empty response;
@@ -584,10 +572,10 @@ void CenterServer::initializeSchema() {
         }
         std::cout << std::endl;
 
-        // 使用 time 列名和采样来计算
+        // 使用 date_time 列名和采样来计算
         pqxx::result sampled_rows = txn.exec(
             "SELECT * FROM " + table_name + 
-            " TABLESAMPLE SYSTEM(1) ORDER BY time LIMIT 100"  // 采样1%的数据,最多100行
+            " TABLESAMPLE SYSTEM(1) ORDER BY date_time LIMIT 100"  // 采样1%的数据,最多100行
         );
 
         uint64_t start_time = 0;
@@ -595,7 +583,7 @@ void CenterServer::initializeSchema() {
 
         if (!sampled_rows.empty()) {
             // 获取开始时间
-            start_time = sampled_rows[0]["time"].as<uint64_t>();
+            start_time = sampled_rows[0]["date_time"].as<uint64_t>();
             
             // 计算平均行大小
             size_t total_size = 0;
@@ -605,15 +593,17 @@ void CenterServer::initializeSchema() {
             avg_row_size = total_size / sampled_rows.size();
         }
 
-        size_t rows_per_block = block_size_ * 1024 * 1024 / avg_row_size;
+        size_t rows_per_block = block_size_ / avg_row_size;
         uint64_t time_range = calculateTimeRange(table_name, rows_per_block, txn);
 
         Common::StreamMeta meta;
+        meta.datastream_id_ = table_name;
         meta.unique_id_ = unique_id;
         meta.start_time_ = start_time;
         meta.time_range_ = time_range;
         updateSchema(table_name, meta);
-        std::cout << "Updated schema for table " << table_name << " with unique_id " << unique_id << " start_time " << start_time << "time_range " << time_range << std::endl;
+        std::cout << "Updated schema for table " << table_name << " with unique_id " << unique_id << " start_time " << start_time << " time_range " << time_range
+            << " avg_row_size " << avg_row_size << " rows_per_block " << rows_per_block << std::endl;
     }
 }
 
@@ -631,9 +621,10 @@ size_t CenterServer::calculateRowSize(const pqxx::row& row) {
 }
 
 uint64_t CenterServer::calculateTimeRange(const std::string& table_name, size_t rows_per_block, pqxx::work& txn) {
-    // 使用 time 列名
-    pqxx::result time_diff = txn.exec("SELECT time FROM " + table_name + " ORDER BY time LIMIT 2");
-    uint64_t time_difference = time_diff[1]["time"].as<uint64_t>() - time_diff[0]["time"].as<uint64_t>();
+    // 使用 date_time 列名
+    pqxx::result time_diff = txn.exec("SELECT date_time FROM " + table_name + " ORDER BY date_time LIMIT 2");
+    uint64_t time_difference = time_diff[1]["date_time"].as<uint64_t>() - time_diff[0]["date_time"].as<uint64_t>();
+    std::cout << " time_difference " << time_difference << " rows_per_block " << rows_per_block << std::endl;
     return time_difference * rows_per_block;
 }
 
@@ -646,6 +637,19 @@ void CenterServer::notifyAllNodes(const std::string& new_node) {
             node_info->set_node_address(node);
         }
     }
+    {
+        // 传输所有数据流信息
+        std::lock_guard<std::mutex> lock(schema_mutex_);
+        // 遍历所有 schema 数据
+        for (const auto& [stream_id, meta] : schema_) {
+            std::cout << "notify schema stream_id " <<  stream_id << " to all nodes" << std::endl;
+            auto* stream_meta = update.add_stream_metadata();
+            stream_meta->set_datastream_id(meta.datastream_id_);
+            stream_meta->set_unique_id(meta.unique_id_);
+            stream_meta->set_start_time(meta.start_time_);
+            stream_meta->set_time_range(meta.time_range_);
+        }
+    }
     
     // 通知所有节点（包括新节点）
     for (const auto& node : active_nodes_) {
@@ -656,6 +660,7 @@ void CenterServer::notifyAllNodes(const std::string& new_node) {
         cloud_edge_cache::Empty response;
         
         auto status = stub->UpdateClusterNodes(&context, update, &response);
+        
         if (!status.ok()) {
             std::cerr << "Failed to notify node " << node << ": " << status.error_message() << std::endl;
         } else {
@@ -756,6 +761,69 @@ grpc::Status CenterServer::ExecuteNetworkMeasurement(grpc::ServerContext* contex
                                                  const cloud_edge_cache::ExecuteNetworkMetricsRequest* request,
                                                  cloud_edge_cache::ExecuteNetworkMetricsResponse* response) {
     // 简单地返回接收到的数据，用于测量网络延迟和带宽
+    std::cout << "receive a NetworkMeasurement" << std::endl;
     response->set_data(request->data());
     return grpc::Status::OK;
+}
+
+grpc::Status CenterServer::SubQuery(grpc::ServerContext* context,
+                                const cloud_edge_cache::QueryRequest* request,
+                                cloud_edge_cache::SubQueryResponse* response) {
+    try {
+        auto& config = ConfigManager::getInstance();
+        std::string conn_str = config.getNodeDatabaseConfig(center_addr_).getConnectionString();
+        pqxx::connection conn(conn_str);
+        std::cout << "Center SubQuery start, conn_str = " << conn_str << " sql_query = " << request->sql_query() << std::endl;
+
+        // 首先构造并执行 EXISTS 查询
+        std::string count_sql = "SELECT EXISTS (" + request->sql_query() + " LIMIT 1)";
+        pqxx::work check_txn(conn);
+        bool has_data = check_txn.query_value<bool>(count_sql);
+        check_txn.commit();
+
+        // 如果没有数据，返回假阳性响应
+        if (!has_data) {
+            response->set_status(cloud_edge_cache::SubQueryResponse::FALSE_POSITIVE);
+            return grpc::Status::OK;
+        }
+
+        // 如果有数据，执行完整查询
+        pqxx::work txn(conn);
+        pqxx::result db_result = txn.exec(request->sql_query());
+        txn.commit();
+
+        // 设置响应状态
+        response->set_status(cloud_edge_cache::SubQueryResponse::OK);
+        
+        // 填充查询结果
+        auto* query_response = response->mutable_result();
+        
+        // 设置列信息
+        if (!db_result.empty()) {
+            // 遍历列
+            for (int i = 0; i < db_result.columns(); ++i) {
+                auto* col = query_response->add_columns();
+                col->set_name(db_result.column_name(i));
+                
+                // 将 PostgreSQL OID 转换为字符串
+                pqxx::oid type_oid = db_result.column_type(i);
+                std::string type_str = std::to_string(type_oid);  // 或者使用 OID 到类型名称的映射
+                col->set_type(type_str);
+            }
+
+            // 添加行数据
+            for (const auto& db_row : db_result) {
+                auto* row = query_response->add_rows();
+                for (size_t i = 0; i < db_row.size(); ++i) {
+                    row->add_values(db_row[i].is_null() ? "" : db_row[i].c_str());
+                }
+            }
+        }
+
+        return grpc::Status::OK;
+    } catch (const std::exception& e) {
+        response->set_status(cloud_edge_cache::SubQueryResponse::ERROR);
+        response->set_error_message(e.what());
+        return grpc::Status(grpc::StatusCode::INTERNAL, e.what());
+    }
 }

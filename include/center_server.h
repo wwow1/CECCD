@@ -60,6 +60,9 @@ public:
                                          const cloud_edge_cache::ExecuteNetworkMetricsRequest* request,
                                          cloud_edge_cache::ExecuteNetworkMetricsResponse* response) override;
 
+    grpc::Status SubQuery(grpc::ServerContext* context,
+                          const cloud_edge_cache::QueryRequest* request,
+                          cloud_edge_cache::SubQueryResponse* response);
 private:
 
     struct PredictionStats {
@@ -206,7 +209,6 @@ private:
     
     // 通知所有节点更新集群信息
     void notifyAllNodes(const std::string& new_node);
-
 };
 
 #endif // CENTER_SERVER_H

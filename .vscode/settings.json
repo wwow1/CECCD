@@ -82,6 +82,7 @@
     "shared_mutex": "cpp",
     "roaring.c": "cpp",
     "strstream": "cpp",
-    "*.ipp": "cpp"
+    "*.ipp": "cpp",
+    "*.inc": "cpp"
   }
 }

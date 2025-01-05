@@ -206,3 +206,32 @@ add_custom_target(copy_config ALL DEPENDS ${CMAKE_BINARY_DIR}/config)
 
 # 确保在构建可执行文件之前执行复制
 add_dependencies(center_server copy_config)
+
+# SQL Test Executable
+add_executable(sql_test
+    test/sql_test.cc
+)
+
+# 链接所需的库
+target_link_libraries(sql_test
+    client  # 链接 client 库
+    ${PROTOBUF_LIBRARIES}
+    ${GRPC_LIBRARIES}
+    gRPC::grpc++
+    TBB::tbb
+    pqxx
+    sqlparser
+    nlohmann_json::nlohmann_json
+)
+
+# 设置包含目录
+target_include_directories(sql_test
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_BINARY_DIR}
+        ${PROTOBUF_INCLUDE_DIRS}
+        ${GRPC_INCLUDE_DIRS}
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sql-parser/src
+)

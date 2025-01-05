@@ -1,8 +1,14 @@
 #include "client.h"
 
 Client::Client(const std::string& server_address) {
-    stub_ = cloud_edge_cache::ClientToEdge::NewStub(
-        grpc::CreateChannel(server_address, grpc::InsecureChannelCredentials()));
+    auto channel = grpc::CreateChannel(server_address, grpc::InsecureChannelCredentials());
+    stub_ = cloud_edge_cache::ClientToEdge::NewStub(channel);
+    // 等待目标节点通道就绪
+    if (!channel->WaitForConnected(gpr_time_add(
+            gpr_now(GPR_CLOCK_REALTIME),
+            gpr_time_from_seconds(5, GPR_TIMESPAN)))) {
+        std::cerr << "Failed to connect to target node " << server_address << std::endl;
+    }
 }
 
 std::string Client::Query(const std::string& sql_query) {

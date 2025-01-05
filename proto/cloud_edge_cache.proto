@@ -30,7 +30,6 @@ message StatisticsReport {
 // Cache update message
 message UpdateCacheMeta {
     string src_node_addr = 1;
-    repeated StreamMetadata stream_metadata = 2;
     repeated BlockOperationInfo block_operations = 3;  // 添加块操作信息
 }
 
@@ -96,6 +95,7 @@ service EdgeToEdge {
 service EdgeToCenter {
     rpc Register(RegisterRequest) returns (Empty);
     rpc ReportStatistics(StatisticsReport) returns (Empty);
+    rpc SubQuery(QueryRequest) returns (SubQueryResponse);
 }
 
 // APIs for center-to-edge communication
@@ -117,7 +117,6 @@ message BlockOperationInfo {
 
 message CacheReplacement {
     repeated BlockOperationInfo block_operations = 1;
-    repeated StreamMetadata stream_metadata = 2;  // 添加相关的流元数据
 }
 
 // 添加新的消息类型
@@ -143,4 +142,5 @@ message NodeInfo {
 
 message ClusterNodesUpdate {
     repeated NodeInfo nodes = 1;
+    repeated StreamMetadata stream_metadata = 2;
 }

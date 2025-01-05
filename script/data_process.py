@@ -5,16 +5,16 @@ from datetime import datetime
 df = pd.read_csv('/root/tmp-data/household_power_consumption.txt', sep=';', na_values=['?'])
 
 # 合并Date和Time列，转换为datetime格式
-df['time'] = pd.to_datetime(df['Date'] + ' ' + df['Time'], format='%d/%m/%Y %H:%M:%S')
+df['date_time'] = pd.to_datetime(df['Date'] + ' ' + df['Time'], format='%d/%m/%Y %H:%M:%S')
 
 # 将datetime转换为uint64（Unix时间戳，单位为毫秒）
-df['time'] = df['time'].astype('int64') // 10**6  # 转换为毫秒级时间戳
+df['date_time'] = df['date_time'].astype('int64') // 10**6  # 转换为毫秒级时间戳
 
 # 删除原来的Date和Time列
 df = df.drop(['Date', 'Time'], axis=1)
 
 # 重新排列列的顺序，将data放在第一列
-columns = ['time'] + [col for col in df.columns if col != 'time']
+columns = ['date_time'] + [col for col in df.columns if col != 'date_time']
 df = df[columns]
 
 # 将处理后的数据保存为CSV文件
