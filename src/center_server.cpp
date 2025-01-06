@@ -118,6 +118,7 @@ void CenterServer::cacheReplacementLoop() {
         calculateQCCVs();
         auto new_allocation_plan = generateAllocationPlan();
         
+        std::cout << "start executeCacheReplacement" << std::endl;
         // 3. 执行缓存替换
         executeCacheReplacement(new_allocation_plan);
         
@@ -583,10 +584,12 @@ void CenterServer::initializeSchema() {
 
         uint64_t start_time = 0;
         size_t avg_row_size = 0;
-
+        // 获取表中最小的 date_time
+        pqxx::result min_time = txn.exec(
+            "SELECT MIN(date_time) as min_time FROM " + table_name
+        );
+        start_time = min_time[0]["min_time"].as<uint64_t>();
         if (!sampled_rows.empty()) {
-            // 获取开始时间
-            start_time = sampled_rows[0]["date_time"].as<uint64_t>();
             
             // 计算平均行大小
             size_t total_size = 0;

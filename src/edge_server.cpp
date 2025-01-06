@@ -850,6 +850,10 @@ grpc::Status EdgeServer::ReplaceCache(grpc::ServerContext* context,
 void EdgeServer::Start(const std::string& server_address) {
     server_address_ = server_address;
 
+    // 启动统计信息上报线程
+    should_stop_ = false;
+    stats_report_thread_ = std::thread(&EdgeServer::statsReportLoop, this);
+
     // 启动服务器
     grpc::ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
@@ -898,7 +902,7 @@ void EdgeServer::ReportStatistics(std::vector<cloud_edge_cache::BlockAccessInfo>
     for (const auto& info : infos) {
         request.add_block_stats()->CopyFrom(info);
     }
-
+    std::cout << "ReportStatistics request" << std::endl;
     // 发送统计报告
     cloud_edge_cache::Empty response;
     grpc::ClientContext context;
@@ -1014,7 +1018,7 @@ cloud_edge_cache::SubQueryResponse EdgeServer::executeSubQuery(const std::string
     cloud_edge_cache::SubQueryResponse response;
     grpc::ClientContext context;
 
-    std::cout << "Executing SubQuery RPC to " << node_id << std::endl;
+    // std::cout << "Executing SubQuery RPC to " << node_id << std::endl;
     auto status = stub->SubQuery(&context, request, &response);
 
     if (!status.ok()) {
