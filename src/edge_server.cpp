@@ -726,7 +726,7 @@ void EdgeServer::addDataBlock(const std::string& table_name,
         " AND date_time < " + std::to_string(block_end_time);
     
     pqxx::result rows = center_txn.exec(select_query);
-    
+    std::cout << "addDataBlock select_query = " << select_query << std::endl;
     if (!rows.empty()) {
         std::string insert_query = buildInsertQuery(table_name, rows);
         local_txn.exec(insert_query);

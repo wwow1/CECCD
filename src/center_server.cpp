@@ -549,6 +549,21 @@ void CenterServer::executeNodeCacheUpdate(
     }
 }
 
+uint64_t CenterServer::calculateTimeRange(const std::string& table_name, size_t rows_per_block, pqxx::work& txn) {
+    // 使用 CAST 将 date_time 转换为 bigint
+    pqxx::result time_diff = txn.exec(
+        "SELECT CAST(date_time AS bigint) AS date_time "
+        "FROM " + table_name + " "
+        "ORDER BY date_time LIMIT 2"
+    );
+    
+    uint64_t time_difference = time_diff[1]["date_time"].as<uint64_t>() - 
+                              time_diff[0]["date_time"].as<uint64_t>();
+    std::cout << "time_difference: " << time_difference 
+              << " rows_per_block: " << rows_per_block << std::endl;
+    return time_difference * rows_per_block;
+}
+
 void CenterServer::initializeSchema() {
     auto& db_config = ConfigManager::getInstance().getDatabaseConfig();
     std::cout << "Database config: " << db_config.getConnectionString() << std::endl;
@@ -560,47 +575,21 @@ void CenterServer::initializeSchema() {
 
     for (const auto& row : tables) {
         std::string table_name = row["table_name"].c_str();
-        
         uint32_t unique_id = generateUniqueId(table_name);
 
-        // 首先获取表的列信息
-        pqxx::result columns = txn.exec(
-            "SELECT column_name, data_type "
-            "FROM information_schema.columns "
-            "WHERE table_name = '" + table_name + "' "
-            "ORDER BY ordinal_position"
+        // 使用 ROUND 函数将浮点数四舍五入为整数
+        pqxx::result avg_size = txn.exec(
+            "SELECT ROUND(AVG(pg_column_size(t.*))) as avg_row_size "
+            "FROM " + table_name + " t "
+            "TABLESAMPLE SYSTEM(1)"  // 采样1%的数据
         );
-        
-        // 打印表头信息
-        std::cout << "\nTable: " << table_name << "\nColumns:\n";
-        for (const auto& col : columns) {
-            std::cout << "  " << col["column_name"].c_str() 
-                      << " (" << col["data_type"].c_str() << ")\n";
-        }
-        std::cout << std::endl;
+        size_t avg_row_size = avg_size[0]["avg_row_size"].as<size_t>();
 
-        // 使用 date_time 列名和采样来计算
-        pqxx::result sampled_rows = txn.exec(
-            "SELECT * FROM " + table_name + 
-            " TABLESAMPLE SYSTEM(1) ORDER BY date_time LIMIT 100"  // 采样1%的数据,最多100行
-        );
-
-        uint64_t start_time = 0;
-        size_t avg_row_size = 0;
-        // 获取表中最小的 date_time
+        // 获取表中最小的 date_time，使用 CAST 转换为 bigint
         pqxx::result min_time = txn.exec(
-            "SELECT MIN(date_time) as min_time FROM " + table_name
+            "SELECT CAST(MIN(date_time) AS bigint) as min_time FROM " + table_name
         );
-        start_time = min_time[0]["min_time"].as<uint64_t>();
-        if (!sampled_rows.empty()) {
-            
-            // 计算平均行大小
-            size_t total_size = 0;
-            for (const auto& row : sampled_rows) {
-                total_size += calculateRowSize(row);
-            }
-            avg_row_size = total_size / sampled_rows.size();
-        }
+        uint64_t start_time = min_time[0]["min_time"].as<uint64_t>();
 
         size_t rows_per_block = block_size_ / avg_row_size;
         uint64_t time_range = calculateTimeRange(table_name, rows_per_block, txn);
@@ -611,30 +600,20 @@ void CenterServer::initializeSchema() {
         meta.start_time_ = start_time;
         meta.time_range_ = time_range;
         updateSchema(table_name, meta);
-        std::cout << "Updated schema for table " << table_name << " with unique_id " << unique_id << " start_time " << start_time << " time_range " << time_range
-            << " avg_row_size " << avg_row_size << " rows_per_block " << rows_per_block << std::endl;
+        
+        std::cout << "Updated schema for table " << table_name 
+                  << "\n  unique_id: " << unique_id 
+                  << "\n  start_time: " << start_time 
+                  << "\n  time_range: " << time_range
+                  << "\n  avg_row_size: " << avg_row_size 
+                  << "\n  rows_per_block: " << rows_per_block 
+                  << std::endl;
     }
 }
 
 uint32_t CenterServer::generateUniqueId(const std::string& table_name) {
     static uint32_t last_id = 0;  // Static variable to keep track of the last assigned ID
     return last_id++;  // Increment and return the last assigned ID
-}
-
-size_t CenterServer::calculateRowSize(const pqxx::row& row) {
-    size_t total_size = 0;
-    for (const auto& field : row) {
-        total_size += field.size();  // Add the size of each field
-    }
-    return total_size;
-}
-
-uint64_t CenterServer::calculateTimeRange(const std::string& table_name, size_t rows_per_block, pqxx::work& txn) {
-    // 使用 date_time 列名
-    pqxx::result time_diff = txn.exec("SELECT date_time FROM " + table_name + " ORDER BY date_time LIMIT 2");
-    uint64_t time_difference = time_diff[1]["date_time"].as<uint64_t>() - time_diff[0]["date_time"].as<uint64_t>();
-    std::cout << " time_difference " << time_difference << " rows_per_block " << rows_per_block << std::endl;
-    return time_difference * rows_per_block;
 }
 
 void CenterServer::notifyAllNodes(const std::string& new_node) {
