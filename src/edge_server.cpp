@@ -301,11 +301,155 @@ void EdgeServer::mergeQueryResults(cloud_edge_cache::QueryResponse* response,
     }
 }
 
-// Add new helper function to modify SQL query with block conditions
+// 新增：辅助函数，用于处理表达式
+std::string EdgeServer::expressionToString(const hsql::Expr* expr) {
+    if (!expr) return "";
+    
+    switch (expr->type) {
+        case hsql::kExprStar:
+            return "*";
+            
+        case hsql::kExprColumnRef:
+            return expr->table ? 
+                   std::string(expr->table) + "." + expr->name :
+                   expr->name;
+            
+        case hsql::kExprLiteralFloat:
+            return std::to_string(expr->fval);
+            
+        case hsql::kExprLiteralInt:
+            return std::to_string(expr->ival);
+            
+        case hsql::kExprLiteralString:
+            return "'" + std::string(expr->name) + "'";
+            
+        case hsql::kExprFunctionRef: {
+            std::string func_str = expr->name;
+            func_str += "(";
+            if (expr->exprList != nullptr) {
+                for (size_t i = 0; i < expr->exprList->size(); ++i) {
+                    if (i > 0) func_str += ", ";
+                    func_str += expressionToString(expr->exprList->at(i));
+                }
+            }
+            func_str += ")";
+            return func_str;
+        }
+            
+        case hsql::kExprOperator: {
+            std::string op_str;
+            // 处理一元运算符
+            if (expr->opType == hsql::kOpNot) {
+                return "NOT " + expressionToString(expr->expr);
+            }
+            
+            // 处理二元运算符
+            std::string left = expressionToString(expr->expr);
+            std::string right = expressionToString(expr->expr2);
+            
+            // 处理特殊情况：BETWEEN
+            if (expr->opType == hsql::kOpBetween) {
+                return left + " BETWEEN " + right + " AND " + 
+                       expressionToString(expr->expr2);
+            }
+            
+            // 处理 IS NULL 和 IS NOT NULL
+            if (expr->opType == hsql::kOpIsNull) {
+                return left + " IS NULL";
+            }
+            if (expr->opType == hsql::kOpIsNull) {
+                return left + " IS NOT NULL";
+            }
+            
+            // 处理常规二元运算符
+            switch (expr->opType) {
+                case hsql::kOpPlus:   return left + " + " + right;
+                case hsql::kOpMinus:  return left + " - " + right;
+                case hsql::kOpAsterisk: return left + " * " + right;
+                case hsql::kOpSlash:  return left + " / " + right;
+                case hsql::kOpEquals: return left + " = " + right;
+                case hsql::kOpNotEquals: return left + " != " + right;
+                case hsql::kOpLess:   return left + " < " + right;
+                case hsql::kOpLessEq: return left + " <= " + right;
+                case hsql::kOpGreater: return left + " > " + right;
+                case hsql::kOpGreaterEq: return left + " >= " + right;
+                case hsql::kOpAnd:    return "(" + left + " AND " + right + ")";
+                case hsql::kOpOr:     return "(" + left + " OR " + right + ")";
+                case hsql::kOpLike:   return left + " LIKE " + right;
+                case hsql::kOpNotLike: return left + " NOT LIKE " + right;
+                case hsql::kOpIn:     return left + " IN " + right;
+                case hsql::kOpNot:    return left + " NOT IN " + right;
+                default:              return left + " ?? " + right;
+            }
+        }
+            
+        case hsql::kExprSelect:
+            // 处理子查询
+            return "(" + subqueryToString(expr->select) + ")";
+            
+        default:
+            return expr->name ? expr->name : "";
+    }
+}
+
+// 新增：处理子查询的辅助函数
+std::string EdgeServer::subqueryToString(const hsql::SelectStatement* select) {
+    std::stringstream ss;
+    
+    // SELECT 子句
+    ss << "SELECT ";
+    if (select->selectList != nullptr) {
+        for (size_t i = 0; i < select->selectList->size(); ++i) {
+            if (i > 0) ss << ", ";
+            ss << expressionToString(select->selectList->at(i));
+        }
+    }
+    
+    // FROM 子句
+    if (select->fromTable != nullptr) {
+        ss << " FROM " << select->fromTable->getName();
+    }
+    
+    // WHERE 子句
+    if (select->whereClause != nullptr) {
+        ss << " WHERE " << expressionToString(select->whereClause);
+    }
+    
+    // GROUP BY 子句
+    if (select->groupBy != nullptr) {
+        ss << " GROUP BY ";
+        for (size_t i = 0; i < select->groupBy->columns->size(); ++i) {
+            if (i > 0) ss << ", ";
+            ss << expressionToString(select->groupBy->columns->at(i));
+        }
+    }
+    
+    // ORDER BY 子句
+    if (select->order != nullptr) {
+        ss << " ORDER BY ";
+        for (const auto* order_desc : *select->order) {
+            ss << expressionToString(order_desc->expr);
+            if (order_desc->type == hsql::kOrderDesc) {
+                ss << " DESC";
+            }
+        }
+    }
+    
+    // LIMIT 子句
+    if (select->limit != nullptr) {
+        ss << " LIMIT " << select->limit->limit;
+        if (select->limit->offset != nullptr) {
+            ss << " OFFSET " << select->limit->offset->ival;
+        }
+    }
+    
+    return ss.str();
+}
+
+// 修改后的 addBlockConditions 方法
 std::string EdgeServer::addBlockConditions(const std::string& original_sql, 
-                                           const std::string& datastream_id,
-                                           const uint32_t block_id) {
-    // Parse original SQL
+                                         const std::string& datastream_id,
+                                         const uint32_t block_id) {
     hsql::SQLParserResult result;
     hsql::SQLParser::parse(original_sql, &result);
     
@@ -318,9 +462,10 @@ std::string EdgeServer::addBlockConditions(const std::string& original_sql,
         return original_sql;
     }
 
+    const hsql::SelectStatement* select = static_cast<const hsql::SelectStatement*>(stmt);
+
     // 获取数据源元数据
     auto stream_meta_exist = getStreamMeta(datastream_id);
-    
     if (!stream_meta_exist) {
         std::cerr << "Stream metadata not found: " << datastream_id << std::endl;
         return original_sql;
@@ -328,23 +473,70 @@ std::string EdgeServer::addBlockConditions(const std::string& original_sql,
 
     Common::StreamMeta stream_meta = stream_meta_exist.value();
 
-    // Add block-specific timestamp conditions
-    std::stringstream modified_sql;
-    modified_sql << original_sql;
-    
-    // If there's no WHERE clause, add one
-    if (((const hsql::SelectStatement*)stmt)->whereClause == nullptr) {
-        modified_sql << " WHERE ";
-    } else {
-        modified_sql << " AND ";
-    }
-
+    // 计算块的时间范围
     int64_t start_timestamp = stream_meta.start_time_ + block_id * stream_meta.time_range_;
     int64_t end_timestamp = stream_meta.start_time_ + (block_id + 1) * stream_meta.time_range_;
 
+    std::stringstream modified_sql;
+    
+    // SELECT 子句
+    modified_sql << "SELECT ";
+    if (select->selectList != nullptr) {
+        for (size_t i = 0; i < select->selectList->size(); ++i) {
+            if (i > 0) modified_sql << ", ";
+            modified_sql << expressionToString(select->selectList->at(i));
+        }
+    } else {
+        modified_sql << "*";
+    }
+
+    // FROM 子句
+    modified_sql << " FROM ";
+    if (select->fromTable != nullptr) {
+        modified_sql << select->fromTable->getName();
+    }
+
+    // WHERE 子句
+    modified_sql << " WHERE ";
+    if (select->whereClause != nullptr) {
+        modified_sql << "(" << expressionToString(select->whereClause) << ") AND ";
+    }
     modified_sql << "date_time >= " << start_timestamp 
                 << " AND date_time < " << end_timestamp;
-    
+
+    // GROUP BY 子句
+    if (select->groupBy != nullptr) {
+        modified_sql << " GROUP BY ";
+        for (size_t i = 0; i < select->groupBy->columns->size(); ++i) {
+            if (i > 0) modified_sql << ", ";
+            modified_sql << expressionToString(select->groupBy->columns->at(i));
+        }
+    }
+
+    // ORDER BY 子句
+    if (select->order != nullptr) {
+        modified_sql << " ORDER BY ";
+        for (const auto* order_desc : *select->order) {
+            modified_sql << expressionToString(order_desc->expr);
+            if (order_desc->type == hsql::kOrderDesc) {
+                modified_sql << " DESC";
+            }
+        }
+    }
+
+    // LIMIT 子句
+    if (select->limit != nullptr && select->limit->limit != nullptr) {  // 检查 limit->limit 是否为空
+        if (select->limit->limit->type == hsql::kExprLiteralInt) {
+            modified_sql << " LIMIT " << select->limit->limit->ival;
+            
+            // 处理 OFFSET
+            if (select->limit->offset != nullptr && 
+                select->limit->offset->type == hsql::kExprLiteralInt) {
+                modified_sql << " OFFSET " << select->limit->offset->ival;
+            }
+        }
+    }
+
     return modified_sql.str();
 }
 
@@ -492,6 +684,7 @@ void EdgeServer::ensureTableExists(const std::string& table_name,
         
         // 构造并执行创建表的SQL
         std::string create_table_query = buildCreateTableQuery(table_name, schema_info);
+        std::cout << "create_table_query = " << create_table_query << std::endl;
         pqxx::work create_txn(local_conn);
         create_txn.exec(create_table_query);
         create_txn.commit();
@@ -597,7 +790,7 @@ grpc::Status EdgeServer::ReplaceCache(grpc::ServerContext* context,
     try {
 
         auto& config = ConfigManager::getInstance();
-        std::string local_conn_str = config.getNodeDatabaseConfig(server_address_).getConnectionString();
+        std::string local_conn_str = config.getDatabaseConfig().getConnectionString();
         std::string center_conn_str = config.getNodeDatabaseConfig(center_addr_).getConnectionString();
         
         pqxx::connection local_conn(local_conn_str);
@@ -726,12 +919,32 @@ grpc::Status EdgeServer::SubQuery(grpc::ServerContext* context,
         auto& config = ConfigManager::getInstance();
         std::string conn_str = config.getDatabaseConfig().getConnectionString();
         pqxx::connection conn(conn_str);
-        std::cout << "Edge SubQuery start, conn_str = " << conn_str << " sql_query = " << request->sql_query() << std::endl;
+        
+        // 获取数据流元数据
+        auto datastream_id = getDatastreamId(request->stream_unique_id());
+        if (!datastream_id) {
+            throw std::runtime_error("Datastream ID not found");
+        }
 
-        // 首先构造并执行 EXISTS 查询
-        std::string count_sql = "SELECT EXISTS (" + request->sql_query() + " LIMIT 1)";
+        auto stream_meta = getStreamMeta(datastream_id.value());
+        if (!stream_meta) {
+            throw std::runtime_error("Stream metadata not found");
+        }
+
+        // 计算块的时间范围
+        int64_t start_timestamp = stream_meta->start_time_ + 
+                                request->block_id() * stream_meta->time_range_;
+        int64_t end_timestamp = start_timestamp + stream_meta->time_range_;
+
+        // 构造简单的 EXISTS 查询
+        std::string exists_sql = 
+            "SELECT EXISTS (SELECT 1 FROM " + datastream_id.value() + 
+            " WHERE date_time >= " + std::to_string(start_timestamp) + 
+            " AND date_time < " + std::to_string(end_timestamp) + ")";
+
+        // 执行 EXISTS 查询
         pqxx::work check_txn(conn);
-        bool has_data = check_txn.query_value<bool>(count_sql);
+        bool has_data = check_txn.query_value<bool>(exists_sql);
         check_txn.commit();
 
         // 如果没有数据，返回假阳性响应
@@ -753,15 +966,10 @@ grpc::Status EdgeServer::SubQuery(grpc::ServerContext* context,
         
         // 设置列信息
         if (!db_result.empty()) {
-            // 遍历列
             for (int i = 0; i < db_result.columns(); ++i) {
                 auto* col = query_response->add_columns();
                 col->set_name(db_result.column_name(i));
-                
-                // 将 PostgreSQL OID 转换为字符串
-                pqxx::oid type_oid = db_result.column_type(i);
-                std::string type_str = std::to_string(type_oid);  // 或者使用 OID 到类型名称的映射
-                col->set_type(type_str);
+                col->set_type(std::to_string(db_result.column_type(i)));
             }
 
             // 添加行数据
@@ -775,6 +983,7 @@ grpc::Status EdgeServer::SubQuery(grpc::ServerContext* context,
 
         return grpc::Status::OK;
     } catch (const std::exception& e) {
+        std::cerr << "Error in SubQuery: " << e.what() << std::endl;
         response->set_status(cloud_edge_cache::SubQueryResponse::ERROR);
         response->set_error_message(e.what());
         return grpc::Status(grpc::StatusCode::INTERNAL, e.what());
@@ -786,7 +995,6 @@ cloud_edge_cache::SubQueryResponse EdgeServer::executeSubQuery(const std::string
                                                              const std::string& sql_query, 
                                                              const uint32_t block_id,
                                                              const uint32_t stream_unique_id) {
-    std::cout << "Creating channel to " << node_id << std::endl;
     auto channel = grpc::CreateChannel(node_id, grpc::InsecureChannelCredentials());
     auto stub = cloud_edge_cache::EdgeToEdge::NewStub(channel);
 
@@ -800,6 +1008,8 @@ cloud_edge_cache::SubQueryResponse EdgeServer::executeSubQuery(const std::string
     
     cloud_edge_cache::QueryRequest request;
     request.set_sql_query(sql_query);
+    request.set_block_id(block_id);                    // 设置 block_id
+    request.set_stream_unique_id(stream_unique_id);    // 设置 stream_unique_id
 
     cloud_edge_cache::SubQueryResponse response;
     grpc::ClientContext context;
@@ -1016,7 +1226,6 @@ grpc::Status EdgeServer::ExecuteNetworkMeasurement(grpc::ServerContext* context,
                                                  const cloud_edge_cache::ExecuteNetworkMetricsRequest* request,
                                                  cloud_edge_cache::ExecuteNetworkMetricsResponse* response) {
     // 简单地返回接收到的数据，用于测量网络延迟和带宽
-    std::cout << "receive a NetworkMeasurement" << std::endl;
     response->set_data(request->data());
     return grpc::Status::OK;
 }

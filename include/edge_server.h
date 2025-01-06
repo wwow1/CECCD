@@ -111,6 +111,12 @@ private:
                                                      const uint32_t block_id,
                                                      const uint32_t stream_unique_id);
 
+    // 新增：处理SQL表达式的辅助函数
+    std::string expressionToString(const hsql::Expr* expr);
+    
+    // 新增：处理子查询的辅助函数
+    std::string subqueryToString(const hsql::SelectStatement* select);
+
 private:
     std::unique_ptr<EdgeCacheIndex> cache_index_;
     tbb::concurrent_hash_map<std::string, Common::StreamMeta> schema_;

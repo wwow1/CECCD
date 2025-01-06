@@ -35,9 +35,9 @@ message UpdateCacheMeta {
 
 // Query request and response
 message QueryRequest {
-    string sql_query = 1; // SQL query string
-    uint32 block_id = 2;
-    uint32 stream_unique_id = 3;
+    string sql_query = 1;         // SQL query string
+    uint32 block_id = 2;         // Block ID for the query
+    uint32 stream_unique_id = 3;  // Unique ID of the datastream
 }
 
 // Row represents a single row of data

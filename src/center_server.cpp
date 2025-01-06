@@ -764,7 +764,6 @@ grpc::Status CenterServer::ExecuteNetworkMeasurement(grpc::ServerContext* contex
                                                  const cloud_edge_cache::ExecuteNetworkMetricsRequest* request,
                                                  cloud_edge_cache::ExecuteNetworkMetricsResponse* response) {
     // 简单地返回接收到的数据，用于测量网络延迟和带宽
-    std::cout << "receive a NetworkMeasurement" << std::endl;
     response->set_data(request->data());
     return grpc::Status::OK;
 }
@@ -772,28 +771,12 @@ grpc::Status CenterServer::ExecuteNetworkMeasurement(grpc::ServerContext* contex
 grpc::Status CenterServer::SubQuery(grpc::ServerContext* context,
                                 const cloud_edge_cache::QueryRequest* request,
                                 cloud_edge_cache::SubQueryResponse* response) {
-    std::cout << "Center received SubQuery request" << std::endl;
+    std::cout << "Center received SubQuery request" << " sql_query = " << request->sql_query() << " block_id = " << request->block_id() << " stream_unique_id = " << request->stream_unique_id() << std::endl;
     try {
         auto& config = ConfigManager::getInstance();
         std::string conn_str = config.getNodeDatabaseConfig(center_addr_).getConnectionString();
-        std::cout << "Attempting database connection with: " << conn_str << std::endl;
         
         pqxx::connection conn(conn_str);
-        std::cout << "Database connection established" << std::endl;
-        
-        // 首先构造并执行 EXISTS 查询
-        std::string count_sql = "SELECT EXISTS (" + request->sql_query() + " LIMIT 1)";
-        pqxx::work check_txn(conn);
-        bool has_data = check_txn.query_value<bool>(count_sql);
-        check_txn.commit();
-
-        // 如果没有数据，返回假阳性响应
-        if (!has_data) {
-            response->set_status(cloud_edge_cache::SubQueryResponse::FALSE_POSITIVE);
-            return grpc::Status::OK;
-        }
-
-        // 如果有数据，执行完整查询
         pqxx::work txn(conn);
         pqxx::result db_result = txn.exec(request->sql_query());
         txn.commit();
