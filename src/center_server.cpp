@@ -424,10 +424,13 @@ CenterServer::calculateNodeQCCVs(const std::string& block_key, const WeightedSta
             // 计算查询结果大小 QD
             double QD_n_i_t = Sm_i_t * block_size_;  // QD = 选择率 * 原始数据块大小
             
-            // 计算从缓存节点m到访问节点n的传输时间
-            double W_mn = getNetworkBandwidth(cache_node, access_node);
-            double T_pl_mn = getNetworkLatency(cache_node, access_node);
-            double T_mn_i = QD_n_i_t / W_mn + T_pl_mn;
+            double T_mn_i = 0;
+            if (cache_node != access_node) {
+                // 计算从缓存节点m到访问节点n的传输时间
+                double W_mn = getNetworkBandwidth(cache_node, access_node);
+                double T_pl_mn = getNetworkLatency(cache_node, access_node);
+                T_mn_i = QD_n_i_t / W_mn + T_pl_mn;
+            }
             
             // 计算从中心节点到访问节点n的传输时间
             double W_center_n = getNetworkBandwidth(center_addr_, access_node);

@@ -67,7 +67,9 @@ public:
 
     grpc::Status UpdateMetadata(grpc::ServerContext* context,
                                const cloud_edge_cache::UpdateCacheMeta* request,
-                               cloud_edge_cache::Empty* response) override {}
+                               cloud_edge_cache::Empty* response) override {
+        return grpc::Status(grpc::StatusCode::UNIMPLEMENTED, "UpdateMetadata is not implemented in CenterServer");
+    }
 
 private:
 
