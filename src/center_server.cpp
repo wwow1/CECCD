@@ -355,19 +355,22 @@ Common::StreamMeta CenterServer::getStreamMeta(const uint32_t unique_id) {
 void CenterServer::Start(const std::string& server_address) {
     // 初始化 schema
     initializeSchema();
-    // 启动预测循环
-    std::thread(&CenterServer::cacheReplacementLoop, this).detach();
     
     grpc::ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-
-    // Register the service implementations with the server builder
+    
+    // 注册所有服务
     builder.RegisterService(static_cast<cloud_edge_cache::EdgeToCenter::Service*>(this));
     builder.RegisterService(static_cast<cloud_edge_cache::CenterToEdge::Service*>(this));
     builder.RegisterService(static_cast<cloud_edge_cache::NetworkMetricsService::Service*>(this));
-
+    builder.RegisterService(static_cast<cloud_edge_cache::EdgeToEdge::Service*>(this));
+    
     std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
     std::cout << "Center server is running on " << server_address << std::endl;
+    
+    // 启动预测循环
+    std::thread(&CenterServer::cacheReplacementLoop, this).detach();
+    
     server->Wait();
 }
 
@@ -769,12 +772,15 @@ grpc::Status CenterServer::ExecuteNetworkMeasurement(grpc::ServerContext* contex
 grpc::Status CenterServer::SubQuery(grpc::ServerContext* context,
                                 const cloud_edge_cache::QueryRequest* request,
                                 cloud_edge_cache::SubQueryResponse* response) {
+    std::cout << "Center received SubQuery request" << std::endl;
     try {
         auto& config = ConfigManager::getInstance();
         std::string conn_str = config.getNodeDatabaseConfig(center_addr_).getConnectionString();
+        std::cout << "Attempting database connection with: " << conn_str << std::endl;
+        
         pqxx::connection conn(conn_str);
-        std::cout << "Center SubQuery start, conn_str = " << conn_str << " sql_query = " << request->sql_query() << std::endl;
-
+        std::cout << "Database connection established" << std::endl;
+        
         // 首先构造并执行 EXISTS 查询
         std::string count_sql = "SELECT EXISTS (" + request->sql_query() + " LIMIT 1)";
         pqxx::work check_txn(conn);
@@ -822,6 +828,7 @@ grpc::Status CenterServer::SubQuery(grpc::ServerContext* context,
 
         return grpc::Status::OK;
     } catch (const std::exception& e) {
+        std::cerr << "Error in SubQuery: " << e.what() << std::endl;
         response->set_status(cloud_edge_cache::SubQueryResponse::ERROR);
         response->set_error_message(e.what());
         return grpc::Status(grpc::StatusCode::INTERNAL, e.what());

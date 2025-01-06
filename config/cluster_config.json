@@ -6,8 +6,8 @@
         "block_size_mb": 1,
         "edge_capacity_gb": 1.0,
         "index_latency_threshold_ms": 30,
-        "statistics_report_interval_s": 5000,
-        "prediction_period_s": 300000
+        "statistics_report_interval_s": 10,
+        "prediction_period_s": 60
     },
     "database": {
         "host": "localhost",

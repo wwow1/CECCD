@@ -14,7 +14,7 @@ struct DatabaseConfig {
     std::string password;
 
     std::string getConnectionString() const {
-        return "postgresql://" + user + ":" + password + "@" 
+        return "postgres://" + user + ":" + password + "@" 
                + host + ":" + port + "/" + dbname;
     }
 };

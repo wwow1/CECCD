@@ -36,6 +36,8 @@ message UpdateCacheMeta {
 // Query request and response
 message QueryRequest {
     string sql_query = 1; // SQL query string
+    uint32 block_id = 2;
+    uint32 stream_unique_id = 3;
 }
 
 // Row represents a single row of data
@@ -95,7 +97,6 @@ service EdgeToEdge {
 service EdgeToCenter {
     rpc Register(RegisterRequest) returns (Empty);
     rpc ReportStatistics(StatisticsReport) returns (Empty);
-    rpc SubQuery(QueryRequest) returns (SubQueryResponse);
 }
 
 // APIs for center-to-edge communication

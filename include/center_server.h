@@ -25,7 +25,8 @@
 
 class CenterServer final : public cloud_edge_cache::EdgeToCenter::Service,
                            public cloud_edge_cache::CenterToEdge::Service,
-                           public cloud_edge_cache::NetworkMetricsService::Service {
+                           public cloud_edge_cache::NetworkMetricsService::Service,
+                           public cloud_edge_cache::EdgeToEdge::Service {
 public:
     // 简化 BlockStats 结构
     using NodeStats = std::pair<int, double>;  // first: access_count, second: total_selectivity
@@ -62,7 +63,12 @@ public:
 
     grpc::Status SubQuery(grpc::ServerContext* context,
                           const cloud_edge_cache::QueryRequest* request,
-                          cloud_edge_cache::SubQueryResponse* response);
+                          cloud_edge_cache::SubQueryResponse* response) override;
+
+    grpc::Status UpdateMetadata(grpc::ServerContext* context,
+                               const cloud_edge_cache::UpdateCacheMeta* request,
+                               cloud_edge_cache::Empty* response) override {}
+
 private:
 
     struct PredictionStats {

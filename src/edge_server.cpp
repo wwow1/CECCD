@@ -724,7 +724,7 @@ grpc::Status EdgeServer::SubQuery(grpc::ServerContext* context,
                                 cloud_edge_cache::SubQueryResponse* response) {
     try {
         auto& config = ConfigManager::getInstance();
-        std::string conn_str = config.getNodeDatabaseConfig(server_address_).getConnectionString();
+        std::string conn_str = config.getDatabaseConfig().getConnectionString();
         pqxx::connection conn(conn_str);
         std::cout << "Edge SubQuery start, conn_str = " << conn_str << " sql_query = " << request->sql_query() << std::endl;
 
@@ -786,19 +786,30 @@ cloud_edge_cache::SubQueryResponse EdgeServer::executeSubQuery(const std::string
                                                              const std::string& sql_query, 
                                                              const uint32_t block_id,
                                                              const uint32_t stream_unique_id) {
+    std::cout << "Creating channel to " << node_id << std::endl;
     auto channel = grpc::CreateChannel(node_id, grpc::InsecureChannelCredentials());
     auto stub = cloud_edge_cache::EdgeToEdge::NewStub(channel);
-    std::cout << "executeSubQuery: node_id " << node_id << " block_id " << block_id
-              << " stream_unique_id " << stream_unique_id << std::endl;
+
+    // 添加通道状态检查
+    if (!channel->WaitForConnected(gpr_time_add(
+            gpr_now(GPR_CLOCK_REALTIME),
+            gpr_time_from_seconds(5, GPR_TIMESPAN)))) {
+        std::cerr << "Failed to connect to node: " << node_id << std::endl;
+        throw std::runtime_error("Connection failed");
+    }
+    
     cloud_edge_cache::QueryRequest request;
     request.set_sql_query(sql_query);
 
     cloud_edge_cache::SubQueryResponse response;
     grpc::ClientContext context;
 
+    std::cout << "Executing SubQuery RPC to " << node_id << std::endl;
     auto status = stub->SubQuery(&context, request, &response);
 
     if (!status.ok()) {
+        std::cerr << "RPC failed: " << status.error_message() 
+                  << " (code=" << status.error_code() << ")" << std::endl;
         throw std::runtime_error("RPC failed: " + status.error_message());
     }
 
