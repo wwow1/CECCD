@@ -1,4 +1,5 @@
 #include "center_server.h"
+#include <vector>
 
 CenterServer::CenterServer() {
     auto& config = ConfigManager::getInstance();
@@ -118,7 +119,7 @@ void CenterServer::cacheReplacementLoop() {
         calculateQCCVs();
         auto new_allocation_plan = generateAllocationPlan();
         
-        std::cout << "start executeCacheReplacement" << std::endl;
+        std::cout << "\nstart executeCacheReplacement" << std::endl;
         // 3. 执行缓存替换
         executeCacheReplacement(new_allocation_plan);
         
@@ -150,9 +151,12 @@ void CenterServer::updateAccessHistory(const std::unordered_map<std::string, Blo
 void CenterServer::processQCCVTask(const std::string& key, const std::vector<BlockStats>& history) {
     auto weighted_stats = calculateWeightedStats(history);
     auto node_qccv_values = calculateNodeQCCVs(key, weighted_stats);
+    std::vector<std::pair<std::string, double>> candidates;
     for (const auto& [node, qccv] : node_qccv_values) {
-        replacement_queue_.addBlockQCCV(key, node, qccv);
+        candidates.push_back(std::make_pair(node, qccv));
+        // std::cout << "block_key: " << key << "  node: " << node << "  qccv: " << qccv << std::endl;
     }
+    replacement_queue_.addBlockQCCV(key, candidates);
 }
 
 void CenterServer::calculateQCCVs() {
@@ -163,8 +167,6 @@ void CenterServer::calculateQCCVs() {
     // std::cout << "historical_stats_ size: " << historical_stats_.size() << std::endl;
     for (const auto& [key, history] : historical_stats_) {
         if (history.empty()) continue;
-        
-        // 使用 std::async 来获取 future 对象
         futures.push_back(pool.enqueue([this, key, history]() {
             processQCCVTask(key, history);
         }));
@@ -174,6 +176,16 @@ void CenterServer::calculateQCCVs() {
     for (auto& future : futures) {
         future.get();
     }
+
+    // // 添加调试日志
+    // std::cout << "\nQCCV calculations completed. Block candidates:" << std::endl;
+    // {
+    //     tbb::concurrent_hash_map<std::string, std::vector<std::pair<std::string, double>>>::const_accessor accessor;
+    //     for (auto it = replacement_queue_.block_candidates_.begin(); 
+    //          it != replacement_queue_.block_candidates_.end(); ++it) {
+    //         std::cout << "Block " << it->first << " candidates count: " << it->second.size() << std::endl;
+    //     }
+    // }
 
     replacement_queue_.buildPriorityQueue();
 }
@@ -190,6 +202,7 @@ CenterServer::generateAllocationPlan() {
         
         if (checkNodeCapacity(node)) {
             new_allocation_plan[node].insert(block_key);
+            std::cout << "block_key: " << block_key << "  node: " << node << "  new_allocation_plan: " << new_allocation_plan[node].size() << std::endl;
             updateNodeCapacity(node);
         } else {
             replacement_queue_.addNextBestCandidate(block_key);
@@ -243,13 +256,20 @@ double CenterServer::getNetworkLatency(const std::string& from_node, const std::
 // 实现 CacheReplacementQueue 的方法
 void CenterServer::CacheReplacementQueue::addBlockQCCV(
     const std::string& block_key, 
-    const std::string& node, 
-    double qccv) {
-    if (qccv > 0) {  // Only consider positive QCCV values
-        tbb::concurrent_hash_map<std::string, std::vector<std::pair<std::string, double>>>::accessor accessor;
+    const std::vector<std::pair<std::string, double>>& candidates) { 
+    tbb::concurrent_hash_map<std::string, std::vector<std::pair<std::string, double>>>::accessor accessor;
+    if (!block_candidates_.find(accessor, block_key)) {
+        // 如果键不存在，创建新条目
         block_candidates_.insert(accessor, block_key);
-        accessor->second.emplace_back(node, qccv);
     }
+    // 将 candidates 中的所有元素添加到 vector 中
+    accessor->second = candidates;  // 直接赋值替换，因为这是一个完整的候选列表
+    
+    // // 添加调试日志
+    // std::cout << "Added candidates for block " << block_key << ":" << std::endl;
+    // for (const auto& [node, qccv] : candidates) {
+    //     std::cout << "  Node: " << node << ", QCCV: " << qccv << std::endl;
+    // }
 }
 
 void CenterServer::CacheReplacementQueue::addNextBestCandidate(const std::string& block_key) {
@@ -279,31 +299,60 @@ void CenterServer::CacheReplacementQueue::buildPriorityQueue() {
         priority_queue_.pop();
     }
     
-    // 对每个数据块，将其最大QCCV值的候选节点加入优先队列
-    for (auto it = block_candidates_.begin(); it != block_candidates_.end(); ++it) {
-        addNextBestCandidate(it->first);
+    std::cout << "\nBuilding priority queue with candidates:" << std::endl;
+    
+    // 首先收集所有的 block keys（workaround）
+    std::vector<std::string> block_keys;
+    {
+        tbb::concurrent_hash_map<std::string, std::vector<std::pair<std::string, double>>>::const_accessor accessor;
+        for (auto it = block_candidates_.begin(); it != block_candidates_.end(); ++it) {
+            block_keys.push_back(it->first);
+            std::cout << "Found block " << it->first << " with " << it->second.size() << " candidates" << std::endl;
+        }
+    }
+    
+    // 然后处理每个 block
+    for (const auto& block_key : block_keys) {
+        addNextBestCandidate(block_key);
+    }
+    
+    // 打印最终队列内容
+    std::cout << "\nFinal priority queue contents:" << std::endl;
+    auto temp_queue = priority_queue_;
+    while (!temp_queue.empty()) {
+        auto [qccv, block_key, node] = temp_queue.top();
+        std::cout << "QCCV: " << qccv << ", Block: " << block_key << ", Node: " << node << std::endl;
+        temp_queue.pop();
     }
 }
 
 std::optional<std::pair<std::string, std::string>> 
 CenterServer::CacheReplacementQueue::getTopPlacementChoice() {
     if (priority_queue_.empty()) {
+        std::cout << "Priority queue is empty" << std::endl;
         return std::nullopt;
     }
     
     auto [qccv, block_key, node] = priority_queue_.top();
     priority_queue_.pop();
     
+    std::cout << "Getting top placement choice: Block " << block_key 
+              << " -> Node " << node << " (QCCV: " << qccv << ")" << std::endl;
+    
     // 使用 accessor 来访问 block_candidates_
     tbb::concurrent_hash_map<std::string, std::vector<std::pair<std::string, double>>>::accessor accessor;
     if (block_candidates_.find(accessor, block_key)) {
         auto& candidates = accessor->second;
+        auto before_size = candidates.size();
         candidates.erase(
             std::remove_if(candidates.begin(), candidates.end(),
                 [&node](const auto& candidate) { return candidate.first == node; }
             ),
             candidates.end()
         );
+        std::cout << "Removed candidate for block " << block_key 
+                  << " (candidates before: " << before_size 
+                  << ", after: " << candidates.size() << ")" << std::endl;
     }
     
     return std::make_pair(block_key, node);
@@ -412,7 +461,6 @@ CenterServer::calculateNodeQCCVs(const std::string& block_key, const WeightedSta
     std::unordered_map<std::string, double> node_qccv_values;
 
     // 对每个可能的缓存节点 m 计算 QCCV
-    // std::cout << "weighted_stats size: " << weighted_stats.size() << std::endl;
     for (const auto& cache_node : edge_server_addresses_) {
         double qccv = 0.0;
         
@@ -420,31 +468,26 @@ CenterServer::calculateNodeQCCVs(const std::string& block_key, const WeightedSta
         for (const auto& [access_node, stats] : weighted_stats) {
             double Pm_i_t = stats.first;   // 访问频率
             double Sm_i_t = stats.second;  // 选择率
-
-            // 计算查询结果大小 QD
             double QD_n_i_t = Sm_i_t * block_size_;  // QD = 选择率 * 原始数据块大小
-            
+
+            // 计算传输时间
             double T_mn_i = 0;
             if (cache_node != access_node) {
-                // 计算从缓存节点m到访问节点n的传输时间
                 double W_mn = getNetworkBandwidth(cache_node, access_node);
                 double T_pl_mn = getNetworkLatency(cache_node, access_node);
                 T_mn_i = QD_n_i_t / W_mn + T_pl_mn;
             }
             
-            // 计算从中心节点到访问节点n的传输时间
             double W_center_n = getNetworkBandwidth(center_addr_, access_node);
             double T_pl_center_n = getNetworkLatency(center_addr_, access_node);
             double T_0n_i = QD_n_i_t / W_center_n + T_pl_center_n;
             
-            // 累加 QCCV
             double time_saving = (T_0n_i - T_mn_i);
             qccv += (time_saving * Pm_i_t) / block_size_;
         }
         
         node_qccv_values[cache_node] = qccv;
-        // std::cout << "QCCV for block " << block_key << " on node " << cache_node 
-        //          << ": " << qccv << std::endl;
+        std::cout << "block_key: " << block_key << "  Final QCCV for node " << cache_node << ": " << qccv << std::endl;
     }
     
     return node_qccv_values;

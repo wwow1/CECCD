@@ -477,11 +477,11 @@ std::string EdgeServer::addBlockConditions(const std::string& original_sql,
     int64_t start_timestamp = stream_meta.start_time_ + block_id * stream_meta.time_range_;
     int64_t end_timestamp = start_timestamp + stream_meta.time_range_;
     
-    std::cout << "Block " << block_id << " time range calculation:" << std::endl
-              << "  start_time_: " << stream_meta.start_time_ << std::endl
-              << "  time_range_: " << stream_meta.time_range_ << std::endl
-              << "  start_timestamp: " << start_timestamp << std::endl
-              << "  end_timestamp: " << end_timestamp << std::endl;
+    // std::cout << "Block " << block_id << " time range calculation:" << std::endl
+    //           << "  start_time_: " << stream_meta.start_time_ << std::endl
+    //           << "  time_range_: " << stream_meta.time_range_ << std::endl
+    //           << "  start_timestamp: " << start_timestamp << std::endl
+    //           << "  end_timestamp: " << end_timestamp << std::endl;
 
     // 检查时间范围的有效性
     if (end_timestamp <= start_timestamp) {
@@ -852,6 +852,7 @@ grpc::Status EdgeServer::ReplaceCache(grpc::ServerContext* context,
 
     // 向所有邻居节点推送更新
     for (const auto& neighbor : neighbor_addrs_) {
+        std::cout << "PushMetadataUpdate to neighbor " << neighbor << std::endl;
         PushMetadataUpdate(update_meta, neighbor);
     }
 
@@ -1143,7 +1144,9 @@ grpc::Status EdgeServer::UpdateClusterNodes(grpc::ServerContext* context,
         // 更新邻居节点列表
         neighbor_addrs_ = std::move(new_neighbors);
     }
-    
+    for (const auto& node : new_nodes) {
+        std::cout << "Node " << node << " added to neighbor_addrs_" << std::endl;
+    }
     return grpc::Status::OK;
 }
 

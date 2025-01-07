@@ -117,7 +117,7 @@ private:
 
     // 新增：缓存替换队列类
     class CacheReplacementQueue {
-    private:
+        public:
         // 优先队列元素类型定义
         using QueueElement = std::tuple<double, std::string, std::string>; // <QCCV值, 数据块ID, 节点ID>
         
@@ -133,15 +133,12 @@ private:
             std::string, 
             std::vector<std::pair<std::string, double>>  // <节点ID, QCCV值>
         > block_candidates_;
-
-    public:
         // 添加新的私有方法
         void addNextBestCandidate(const std::string& block_key);
 
         // 添加数据块的QCCV值及其对应的边缘节点
         void addBlockQCCV(const std::string& block_key, 
-                         const std::string& node, 
-                         double qccv);
+                         const std::vector<std::pair<std::string, double>>& candidates);
         
         // 构建优先队列
         void buildPriorityQueue();
