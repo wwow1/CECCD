@@ -155,19 +155,60 @@ if(BUILD_TESTS)
     # 添加 Google Test 子目录
     add_subdirectory(third_party/googletest)
 
-    # 测试可执行文件
+    # MyBloomFilter 测试可执行文件
+    add_executable(my_bloom_filter_test
+        test/googletest/test_my_bloom_filter.cpp
+    )
+
+    target_link_libraries(my_bloom_filter_test
+        PRIVATE
+        gtest
+        gtest_main
+        client
+        TBB::tbb  # 添加TBB依赖，因为MyBloomFilter使用了shared_mutex
+    )
+
+    target_include_directories(my_bloom_filter_test
+        PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/googletest/googletest/include
+    )
+
+    # 添加到测试套件中
+    add_test(NAME MyBloomFilterTest COMMAND my_bloom_filter_test)
+
+    # CountingBloomFilter 测试可执行文件
+    add_executable(counting_bloom_filter_test
+        test/googletest/test_counting_bloom_filter.cpp
+    )
+
+    target_link_libraries(counting_bloom_filter_test
+        PRIVATE
+        gtest
+        gtest_main
+        client
+    )
+
+    target_include_directories(counting_bloom_filter_test
+        PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/googletest/googletest/include
+    )
+
+    # 添加到测试套件中
+    add_test(NAME CountingBloomFilterTest COMMAND counting_bloom_filter_test)
+
+    # 其他现有的测试配置...
     add_executable(center_server_tests
         test/googletest/center_server_test.cc
         src/center_server.cpp
         ${COMMON_SOURCES}
-        # 其他测试文件
     )
 
     target_link_libraries(center_server_tests
         gtest
         gtest_main
         client
-        # 其他需要的库
     )
 
     enable_testing()

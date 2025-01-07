@@ -487,7 +487,7 @@ CenterServer::calculateNodeQCCVs(const std::string& block_key, const WeightedSta
         }
         
         node_qccv_values[cache_node] = qccv;
-        std::cout << "block_key: " << block_key << "  Final QCCV for node " << cache_node << ": " << qccv << std::endl;
+        // std::cout << "block_key: " << block_key << "  Final QCCV for node " << cache_node << ": " << qccv << std::endl;
     }
     
     return node_qccv_values;

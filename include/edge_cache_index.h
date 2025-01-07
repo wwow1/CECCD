@@ -16,20 +16,52 @@
 struct MyBloomFilter : public Common::BaseIndex {
     mutable std::shared_mutex mutex_;
     elastic_rose::CountingBloomFilter bloom_filter_;
+
+    MyBloomFilter() {
+        auto& config = ConfigManager::getInstance();
+        
+        // 计算edge节点可以存储的最大块数
+        size_t max_blocks = (config.getEdgeCapacityGB() * 1024) / config.getBlockSizeMB();
+        double fpr = config.getBloomFilterFPR();
+        
+        // 为了应对可能的临时超出和动态变化，我们将容量扩大1.2倍
+        size_t num_items = static_cast<size_t>(max_blocks * 1.2);
+        
+        // 根据预期元素数量和目标误判率计算所需的比特数
+        // 使用公式：m = -(n * ln(p)) / (ln(2)^2)，其中：
+        // m = 所需比特数
+        // n = 预期元素数量
+        // p = 期望的误判率
+        size_t bits_needed = static_cast<size_t>(-num_items * log(fpr) / (log(2) * log(2)));
+        
+        // 由于CountingBloomFilter使用8位计数器，每个位置需要1字节
+        size_t total_bytes = bits_needed;
+        
+        std::cout << "Initializing BloomFilter with:"
+                  << "\n  expected items=" << num_items
+                  << "\n  false positive rate=" << fpr
+                  << "\n  total memory=" << total_bytes << " bytes" << std::endl;
+        
+        bloom_filter_ = elastic_rose::CountingBloomFilter(total_bytes, fpr, 0);
+    }
+
     void add(uint32_t datastreamID, uint32_t blockId) {
         std::unique_lock<std::shared_mutex> lock(mutex_);
         bloom_filter_.Add(datastreamID + ":" + std::to_string(blockId));
     }
+
     void remove(uint32_t datastreamID, uint32_t blockId) {
         std::unique_lock<std::shared_mutex> lock(mutex_);
         bloom_filter_.Remove(datastreamID + ":" + std::to_string(blockId));
     }
+
     std::vector<uint32_t> range_query(uint32_t datastreamID,
         const uint32_t start_blockId, const uint32_t end_blockId) const {
         std::shared_lock<std::shared_mutex> lock(mutex_);
         std::vector<uint32_t> result;
         for (uint32_t blockId = start_blockId; blockId <= end_blockId; blockId++) {
-            if (bloom_filter_.KeyMayMatch(datastreamID + ":" + std::to_string(blockId))) {
+            std::string key = std::to_string(datastreamID) + ":" + std::to_string(blockId);
+            if (bloom_filter_.KeyMayMatch(key)) {
                 result.push_back(blockId);
             }
         }
@@ -76,7 +108,7 @@ class EdgeCacheIndex {
 private:
     // 节点ID -> [数据源ID -> 压缩位图]
     std::unordered_map<std::string, std::unique_ptr<Common::BaseIndex>> timeseries_main_index_;
-    // 添加一个枚举来指定索引��型
+    // 添加一个枚举来指定索引类型
     enum class IndexType {
         MIX_INDEX,
         BLOOM_FILTER
@@ -98,6 +130,7 @@ public:
     void setNodeLatency(const std::string& nodeId, int64_t latency);
     void setLatencyThreshold(int64_t threshold);
 
+    int64_t getNodeLatency(const std::string& nodeId) const;
     void addBlock(uint32_t block_id,
                  const std::string& node_id,
                  uint32_t stream_unique_id);

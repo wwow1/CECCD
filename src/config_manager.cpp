@@ -33,4 +33,7 @@ void ConfigManager::loadConfig(const std::string& config_path) {
     
     // Load edge capacity
     edge_capacity_gb_ = j["cluster"]["edge_capacity_gb"].get<double>();
+
+    // Load bloom filter false positive rate
+    bloom_filter_fpr_ = j["cluster"]["bloom_filter_fpr"].get<double>();
 } 

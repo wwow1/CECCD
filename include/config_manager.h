@@ -53,6 +53,8 @@ public:
 
     double getEdgeCapacityGB() const { return edge_capacity_gb_; }
 
+    double getBloomFilterFPR() const { return bloom_filter_fpr_; }
+
 private:
     ConfigManager() = default;
     std::string center_address_;
@@ -62,6 +64,7 @@ private:
     int64_t prediction_period_s_;
     size_t block_size_mb_;
     double edge_capacity_gb_;
+    double bloom_filter_fpr_;
 };
 
 #endif // CONFIG_MANAGER_H 

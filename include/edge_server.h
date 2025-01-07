@@ -204,7 +204,6 @@ private:
     }
 
     std::mutex nodes_mutex_;
-    std::set<std::string> cluster_nodes_;  // 存储集群中的所有节点
     int64_t center_latency_;
 
     // 向中心节点注册

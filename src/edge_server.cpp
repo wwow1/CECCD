@@ -6,11 +6,16 @@ EdgeServer::EdgeServer() {
     block_size_ = config.getBlockSizeMB() * 1024 * 1024;
     // 获取中心节点地址
     center_addr_ = config.getCenterAddress();
-    center_latency_ = measureLatency(center_addr_);
+    // center_latency_ = measureLatency(center_addr_);
+    // 测试专用
+    center_latency_ = 100;
     std::cout << "Center node latency: " << center_latency_ << "ms" << std::endl;
     
     // 初始化缓存索引
     cache_index_ = std::make_unique<EdgeCacheIndex>();
+    neighbor_addrs_.insert(center_addr_);
+    cache_index_->setNodeLatency(server_address_, 0);
+    cache_index_->setNodeLatency(center_addr_, center_latency_);
     cache_index_->setLatencyThreshold(config.getIndexLatencyThresholdMs());
 }
 
@@ -210,11 +215,11 @@ std::tuple<std::string, int64_t, int64_t> EdgeServer::parseSQLQuery(const std::s
             const hsql::SelectStatement* select = (const hsql::SelectStatement*) stmt;
             if (select->fromTable) {
                 table_name = select->fromTable->getName();
-                std::cout << "EdgeServer::parseSQLQuery table_name: " << select->fromTable->getName() << std::endl;
+                // std::cout << "EdgeServer::parseSQLQuery table_name: " << select->fromTable->getName() << std::endl;
             }
             if (select->whereClause != nullptr) {
                 parseWhereClause(select->whereClause, start_timestamp, end_timestamp);
-                std::cout << "EdgeServer::parseSQLQuery start_time " << start_timestamp << " end_time " << end_timestamp << std::endl;
+                // std::cout << "EdgeServer::parseSQLQuery start_time " << start_timestamp << " end_time " << end_timestamp << std::endl;
             }
         }
     }
@@ -752,7 +757,7 @@ void EdgeServer::addDataBlock(const std::string& table_name,
 // 构建插入数据的SQL语句
 std::string EdgeServer::buildInsertQuery(const std::string& table_name, 
                                        const pqxx::result& rows) {
-    std::string query = "INSERT INTO " + table_name + " (";
+    std::string query = "INSERT INTO " + table_name + " ("; 
     for (size_t i = 0; i < rows.columns(); ++i) {
         if (i > 0) query += ", ";
         query += rows.column_name(i);
@@ -849,7 +854,7 @@ grpc::Status EdgeServer::ReplaceCache(grpc::ServerContext* context,
         return grpc::Status(grpc::StatusCode::INTERNAL, 
                           "Database connection error: " + std::string(e.what()));
     }
-
+    
     // 向所有邻居节点推送更新
     for (const auto& neighbor : neighbor_addrs_) {
         std::cout << "PushMetadataUpdate to neighbor " << neighbor << std::endl;
@@ -916,7 +921,7 @@ void EdgeServer::ReportStatistics(std::vector<cloud_edge_cache::BlockAccessInfo>
     for (const auto& info : infos) {
         request.add_block_stats()->CopyFrom(info);
     }
-    std::cout << "ReportStatistics request" << std::endl;
+    // std::cout << "ReportStatistics request" << std::endl;
     // 发送统计报告
     cloud_edge_cache::Empty response;
     grpc::ClientContext context;
@@ -1110,41 +1115,53 @@ grpc::Status EdgeServer::UpdateClusterNodes(grpc::ServerContext* context,
                                           const cloud_edge_cache::ClusterNodesUpdate* request,
                                           cloud_edge_cache::Empty* response) {
     std::cout << "UpdateClusterNodes" << std::endl;
-    std::set<std::string> new_nodes;
     std::set<std::string> new_neighbors;
+
+    // 获取当前的邻居节点列表（用于检查）
+    std::set<std::string> current_neighbors;
+    {
+        std::lock_guard<std::mutex> lock(nodes_mutex_);
+        current_neighbors = neighbor_addrs_;
+    }
 
     // 处理所有节点
     for (const auto& node : request->nodes()) {
         std::string node_addr = node.node_address();
-        new_nodes.insert(node_addr);
-
-        if (node_addr != server_address_) {  // 不处理自己
-            try {
-                int64_t node_latency = measureLatency(node_addr);
-                std::cout << "Node " << node_addr << " latency: " << node_latency << "ms" << std::endl;
-
-                // 如果节点延迟小于中心节点延迟，将其添加为邻居
-                if (node_latency < center_latency_) {
-                    new_neighbors.insert(node_addr);
-                    cache_index_->setNodeLatency(node_addr, node_latency);
-                    std::cout << "Added " << node_addr << " as neighbor" << std::endl;
-                }
-            } catch (const std::exception& e) {
-                std::cerr << "Failed to measure latency to " << node_addr << ": " << e.what() << std::endl;
+        try {
+            int64_t node_latency = 0;
+            
+            // 检查是否是已知的邻居节点
+            if (current_neighbors.find(node_addr) != current_neighbors.end()) {
+                // 已知邻居节点，直接使用缓存的延迟值
+                node_latency = cache_index_->getNodeLatency(node_addr);
+                std::cout << "Using cached latency for node " << node_addr << ": " << node_latency << "ms" << std::endl;
+            } else {
+                // 新节点，需要测量延迟
+                node_latency = measureLatency(node_addr);
+                std::cout << "Measured new node " << node_addr << " latency: " << node_latency << "ms" << std::endl;
             }
+
+            // 如果节点延迟小于中心节点延迟，将其添加为邻居
+            if (node_latency < center_latency_) {
+                new_neighbors.insert(node_addr);
+                cache_index_->setNodeLatency(node_addr, node_latency);
+                std::cout << "Added " << node_addr << " as neighbor" << std::endl;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Failed to measure latency to " << node_addr << ": " << e.what() << std::endl;
         }
     }
+
     // 更新 schema 信息
     updateSchemaInfo(request->stream_metadata());
 
     {
         std::lock_guard<std::mutex> lock(nodes_mutex_);
-        // 更新集群节点列表
-        cluster_nodes_ = std::move(new_nodes);
         // 更新邻居节点列表
         neighbor_addrs_ = std::move(new_neighbors);
     }
-    for (const auto& node : new_nodes) {
+
+    for (const auto& node : neighbor_addrs_) {
         std::cout << "Node " << node << " added to neighbor_addrs_" << std::endl;
     }
     return grpc::Status::OK;
