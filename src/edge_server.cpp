@@ -475,7 +475,20 @@ std::string EdgeServer::addBlockConditions(const std::string& original_sql,
 
     // 计算块的时间范围
     int64_t start_timestamp = stream_meta.start_time_ + block_id * stream_meta.time_range_;
-    int64_t end_timestamp = stream_meta.start_time_ + (block_id + 1) * stream_meta.time_range_;
+    int64_t end_timestamp = start_timestamp + stream_meta.time_range_;
+    
+    std::cout << "Block " << block_id << " time range calculation:" << std::endl
+              << "  start_time_: " << stream_meta.start_time_ << std::endl
+              << "  time_range_: " << stream_meta.time_range_ << std::endl
+              << "  start_timestamp: " << start_timestamp << std::endl
+              << "  end_timestamp: " << end_timestamp << std::endl;
+
+    // 检查时间范围的有效性
+    if (end_timestamp <= start_timestamp) {
+        std::cerr << "Error: Invalid time range calculation for block " << block_id 
+                  << ": end_timestamp <= start_timestamp" << std::endl;
+        return original_sql;
+    }
 
     std::stringstream modified_sql;
     
