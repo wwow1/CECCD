@@ -213,6 +213,27 @@ if(BUILD_TESTS)
 
     enable_testing()
     add_test(NAME AllTests COMMAND center_server_tests)
+
+    # MixIndex 测试可执行文件
+    add_executable(mix_index_test
+        test/googletest/test_mix_index.cpp
+    )
+
+    target_link_libraries(mix_index_test
+        PRIVATE
+        gtest
+        gtest_main
+        client
+    )
+
+    target_include_directories(mix_index_test
+        PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/googletest/googletest/include
+    )
+
+    # 添加到测试套件中
+    add_test(NAME MixIndexTest COMMAND mix_index_test)
 endif()
 
 # Installation rules

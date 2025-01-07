@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "edge_cache_index.h"
+#include "config_manager.h"
 #include <string>
 #include <vector>
 #include <random>
@@ -8,6 +9,42 @@
 class MyBloomFilterTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        // 设置测试用的配置参数
+        auto& config = ConfigManager::getInstance();
+        
+        // 创建一个临时的 JSON 配置
+        nlohmann::json test_config = {
+            {"cluster", {
+                {"center_node", {{"address", "127.0.0.1"}}},
+                {"edge_capacity_gb", 1.0},      // 1GB
+                {"block_size_mb", 1},           // 1MB
+                {"bloom_filter_fpr", 0.01},     // 1% 误判率
+                {"index_latency_threshold_ms", 30},
+                {"statistics_report_interval_s", 60},
+                {"prediction_period_s", 300}
+            }},
+            {"database", {
+                {"host", "localhost"},
+                {"port", "5432"},
+                {"dbname", "testdb"},
+                {"user", "testuser"},
+                {"password", "testpass"}
+            }}
+        };
+        
+        // 将配置写入临时文件
+        std::string test_config_path = "test_config.json";
+        std::ofstream config_file(test_config_path);
+        config_file << test_config.dump(4);
+        config_file.close();
+        
+        // 加载测试配置
+        config.loadConfig(test_config_path);
+        
+        // 删除临时配置文件
+        std::remove(test_config_path.c_str());
+        
+        // 创建布隆过滤器
         filter = std::make_unique<MyBloomFilter>();
     }
 

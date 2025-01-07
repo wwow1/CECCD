@@ -12,6 +12,7 @@
 #include "roaring.hh"
 #include <tbb/concurrent_hash_map.h>
 #include <shared_mutex>
+#include "config_manager.h"
 
 struct MyBloomFilter : public Common::BaseIndex {
     mutable std::shared_mutex mutex_;
@@ -27,19 +28,17 @@ struct MyBloomFilter : public Common::BaseIndex {
         // 为了应对可能的临时超出和动态变化，我们将容量扩大1.2倍
         size_t num_items = static_cast<size_t>(max_blocks * 1.2);
         
-        // 根据预期元素数量和目标误判率计算所需的比特数
-        // 使用公式：m = -(n * ln(p)) / (ln(2)^2)，其中：
-        // m = 所需比特数
-        // n = 预期元素数量
-        // p = 期望的误判率
-        size_t bits_needed = static_cast<size_t>(-num_items * log(fpr) / (log(2) * log(2)));
+        // 计算每个元素需要的比特数（bits per element）
+        // 使用公式：bits_per_elem = -log(p) / (ln(2)^2)
+        double bits_per_elem = -log(fpr) / (log(2) * log(2));
         
-        // 由于CountingBloomFilter使用8位计数器，每个位置需要1字节
-        size_t total_bytes = bits_needed;
+        // 计算总比特数
+        size_t total_bytes = static_cast<size_t>(num_items * bits_per_elem);
         
         std::cout << "Initializing BloomFilter with:"
                   << "\n  expected items=" << num_items
                   << "\n  false positive rate=" << fpr
+                  << "\n  bits per element=" << bits_per_elem
                   << "\n  total memory=" << total_bytes << " bytes" << std::endl;
         
         bloom_filter_ = elastic_rose::CountingBloomFilter(total_bytes, fpr, 0);
@@ -47,12 +46,12 @@ struct MyBloomFilter : public Common::BaseIndex {
 
     void add(uint32_t datastreamID, uint32_t blockId) {
         std::unique_lock<std::shared_mutex> lock(mutex_);
-        bloom_filter_.Add(datastreamID + ":" + std::to_string(blockId));
+        bloom_filter_.Add(std::to_string(datastreamID) + ":" + std::to_string(blockId));
     }
 
     void remove(uint32_t datastreamID, uint32_t blockId) {
         std::unique_lock<std::shared_mutex> lock(mutex_);
-        bloom_filter_.Remove(datastreamID + ":" + std::to_string(blockId));
+        bloom_filter_.Remove(std::to_string(datastreamID) + ":" + std::to_string(blockId));
     }
 
     std::vector<uint32_t> range_query(uint32_t datastreamID,

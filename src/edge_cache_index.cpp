@@ -4,7 +4,7 @@
 #include <cstdint>
 
 std::unique_ptr<Common::BaseIndex> EdgeCacheIndex::createIndex(const std::string& nodeId) {
-    if (node_latencies_[nodeId] > config_latency_threshold_ms_) {
+    if (node_latencies_[nodeId] >= config_latency_threshold_ms_) {
         std::cout << "Using MixIndex for node " << nodeId << " (latency: " 
                   << node_latencies_[nodeId] << "ms)" << std::endl;
         return std::make_unique<MixIndex>();
