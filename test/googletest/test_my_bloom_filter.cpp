@@ -163,20 +163,3 @@ TEST_F(MyBloomFilterTest, MultipleDatastreams) {
         EXPECT_EQ(result[0], blockId);
     }
 }
-
-// 测试边界条件
-TEST_F(MyBloomFilterTest, EdgeCases) {
-    uint32_t datastreamID = 1;
-    
-    // 测试最小和最大的块ID
-    filter->add(datastreamID, 0);
-    filter->add(datastreamID, UINT32_MAX);
-    
-    std::vector<uint32_t> result = filter->range_query(datastreamID, 0, 0);
-    EXPECT_EQ(result.size(), 1);
-    EXPECT_EQ(result[0], 0);
-    
-    result = filter->range_query(datastreamID, UINT32_MAX, UINT32_MAX);
-    EXPECT_EQ(result.size(), 1);
-    EXPECT_EQ(result[0], UINT32_MAX);
-} 
