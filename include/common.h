@@ -39,7 +39,7 @@ struct StreamMeta {
     std::string datastream_id_;
     uint32_t unique_id_;
     uint64_t start_time_;
-    uint32_t time_range_;
+    uint64_t time_range_;
 };
 
 class BaseIndex {

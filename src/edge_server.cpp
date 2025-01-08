@@ -482,11 +482,11 @@ std::string EdgeServer::addBlockConditions(const std::string& original_sql,
     int64_t start_timestamp = stream_meta.start_time_ + block_id * stream_meta.time_range_;
     int64_t end_timestamp = start_timestamp + stream_meta.time_range_;
     
-    // std::cout << "Block " << block_id << " time range calculation:" << std::endl
-    //           << "  start_time_: " << stream_meta.start_time_ << std::endl
-    //           << "  time_range_: " << stream_meta.time_range_ << std::endl
-    //           << "  start_timestamp: " << start_timestamp << std::endl
-    //           << "  end_timestamp: " << end_timestamp << std::endl;
+    std::cout << "Block " << block_id << " time range calculation:" << std::endl
+              << "  start_time_: " << stream_meta.start_time_ << std::endl
+              << "  time_range_: " << stream_meta.time_range_ << std::endl
+              << "  start_timestamp: " << start_timestamp << std::endl
+              << "  end_timestamp: " << end_timestamp << std::endl;
 
     // 检查时间范围的有效性
     if (end_timestamp <= start_timestamp) {
@@ -653,14 +653,14 @@ void EdgeServer::updateBlockOperations(
             cache_index_->addBlock(op.block_id(), 
                                  src_node_addr,
                                  op.datastream_unique_id());
-            std::cout << "Added block " << op.block_id() 
+            std::cout << "Added block meta" << op.block_id() 
                      << " for stream " << op.datastream_unique_id() 
                      << " from node " << src_node_addr << std::endl;
         } else if (op.operation() == cloud_edge_cache::BlockOperation::REMOVE) {
             cache_index_->removeBlock(op.block_id(),
                                     src_node_addr,
                                     op.datastream_unique_id());
-            std::cout << "Removed block " << op.block_id() 
+            std::cout << "Removed block meta" << op.block_id() 
                      << " for stream " << op.datastream_unique_id() 
                      << " from node " << src_node_addr << std::endl;
         }

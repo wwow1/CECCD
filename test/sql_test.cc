@@ -61,11 +61,11 @@ std::tuple<std::string, int64_t, int64_t> parseSQLQuery(const std::string& sql_q
             const hsql::SelectStatement* select = (const hsql::SelectStatement*) stmt;
             if (select->fromTable) {
                 table_name = select->fromTable->getName();
-                std::cout << "EdgeServer::parseSQLQuery table_name: " << select->fromTable->getName() << std::endl;
+                // std::cout << "EdgeServer::parseSQLQuery table_name: " << select->fromTable->getName() << std::endl;
             }
             if (select->whereClause != nullptr) {
                 parseWhereClause(select->whereClause, start_timestamp, end_timestamp);
-                std::cout << "EdgeServer::parseSQLQuery start_time " << start_timestamp << " end_time " << end_timestamp << std::endl;
+                // std::cout << "EdgeServer::parseSQLQuery start_time " << start_timestamp << " end_time " << end_timestamp << std::endl;
             }
         }
     } else {
@@ -93,13 +93,13 @@ int main(int argc, char* argv[]) {
 
     // 构建 SQL 查询语句
     std::string query = "SELECT * FROM household_power_consumption WHERE date_time >= " + min_time + " AND date_time <= " + max_time + " LIMIT 5;";
-    auto [table_name, start_timestamp, end_timestamp] = parseSQLQuery(query);
-    std::cout << "Qirgin Query: " << query
-              << " Query for table: " << table_name 
-              << ", timestamp range: [" << start_timestamp << ", " << end_timestamp << "]" << std::endl;
+    // auto [table_name, start_timestamp, end_timestamp] = parseSQLQuery(query);
+    // std::cout << "Qirgin Query: " << query
+    //           << " Query for table: " << table_name 
+    //           << ", timestamp range: [" << start_timestamp << ", " << end_timestamp << "]" << std::endl;
 
     std::string query2 = "SELECT AVG(global_active_power) FROM household_power_consumption WHERE date_time >= " + min_time + " AND date_time <= " + max_time + ";";
-    std::string query3 = "SELECT COUNT(*) FROM household_power_consumption WHERE voltage > 230 AND date_time >= " + min_time + " AND date_time <= " + max_time + ";";
+    std::string query3 = "SELECT COUNT(*) FROM household_power_consumption WHERE date_time >= " + min_time + " AND date_time <= " + max_time + ";";
 
     // 执行查询并打印结果
     std::cout << "Executing Query 1: " << query << std::endl;

@@ -7,7 +7,7 @@ message StreamMetadata {
     string datastream_id = 1;
     uint32 unique_id = 2;
     uint64 start_time = 3;
-    uint32 time_range = 4;
+    uint64 time_range = 4;
     repeated uint32 block_ids = 5;
 }
 
