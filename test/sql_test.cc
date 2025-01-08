@@ -98,18 +98,18 @@ int main(int argc, char* argv[]) {
               << " Query for table: " << table_name 
               << ", timestamp range: [" << start_timestamp << ", " << end_timestamp << "]" << std::endl;
 
-    //std::string query2 = "SELECT AVG(global_active_power) FROM household_power_consumption WHERE date_time >= " + min_time + " AND date_time <= " + max_time + ";";
-    //std::string query3 = "SELECT COUNT(*) FROM household_power_consumption WHERE voltage > 230 AND date_time >= " + min_time + " AND date_time <= " + max_time + ";";
+    std::string query2 = "SELECT AVG(global_active_power) FROM household_power_consumption WHERE date_time >= " + min_time + " AND date_time <= " + max_time + ";";
+    std::string query3 = "SELECT COUNT(*) FROM household_power_consumption WHERE voltage > 230 AND date_time >= " + min_time + " AND date_time <= " + max_time + ";";
 
     // 执行查询并打印结果
     std::cout << "Executing Query 1: " << query << std::endl;
     std::cout << client.Query(query) << std::endl;
 
-    // std::cout << "Executing Query 2: " << query2 << std::endl;
-    // std::cout << client.Query(query2) << std::endl;
+    std::cout << "Executing Query 2: " << query2 << std::endl;
+    std::cout << client.Query(query2) << std::endl;
 
-    // std::cout << "Executing Query 3: " << query3 << std::endl;
-    // std::cout << client.Query(query3) << std::endl;
+    std::cout << "Executing Query 3: " << query3 << std::endl;
+    std::cout << client.Query(query3) << std::endl;
 
     return 0;
 }
