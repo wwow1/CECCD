@@ -22,14 +22,7 @@ grpc::Status CenterServer::Register(grpc::ServerContext* context,
         // 添加到边缘服务器地址列表
         edge_server_addresses_.push_back(node_addr);
         
-        // 初始化节点容量
-        NodeCapacity capacity;
-        capacity.total_capacity = config.getEdgeCapacityGB() * 1024 / config.getBlockSizeMB();  // 转换为block的个数
-        capacity.used_capacity = 0;
-        node_capacities_[node_addr] = capacity;
-        
         std::cout << "New edge node registered: " << node_addr << std::endl;
-        
     }
     // 重新初始化网络度量
     initializeNetworkMetrics();
@@ -193,20 +186,34 @@ void CenterServer::calculateQCCVs() {
 std::unordered_map<std::string, std::unordered_set<std::string>> 
 CenterServer::generateAllocationPlan() {
     std::unordered_map<std::string, std::unordered_set<std::string>> new_allocation_plan;
-    int full_nodes = 0;
-    
+    auto& config = ConfigManager::getInstance();
+    uint32_t total_capacity = config.getEdgeCapacityGB() * 1024 / config.getBlockSizeMB();
+    std::unordered_map<std::string, uint32_t> used_node_capacities;
+    std::unordered_set<std::string> full_nodes;
+    uint32_t full_nodes_num = 0;
+    for (const auto& node : edge_server_addresses_) {
+        used_node_capacities[node] = 0;
+    }
+
     while (auto placement = replacement_queue_.getTopPlacementChoice()) {
-        if (full_nodes >= edge_server_addresses_.size()) break;
+        if (full_nodes_num >= edge_server_addresses_.size()) break;
         
         auto [block_key, node] = placement.value();
-        
-        if (checkNodeCapacity(node)) {
+
+        if ((used_node_capacities[node] + 1) <= total_capacity) {
             new_allocation_plan[node].insert(block_key);
-            std::cout << "block_key: " << block_key << "  node: " << node << "  new_allocation_plan: " << new_allocation_plan[node].size() << std::endl;
-            updateNodeCapacity(node);
+            // std::cout << "Allocated block " << block_key 
+            //          << " to node " << node 
+            //          << " (used: " << used_node_capacities[node] 
+            //          << "/" << total_capacity << ")" << std::endl;
+            used_node_capacities[node]++;
         } else {
             replacement_queue_.addNextBestCandidate(block_key);
-            full_nodes++;
+            std::cout << "Node " << node << " is full, adding block " << block_key << " to replacement queue" << std::endl;
+            if (full_nodes.find(node) == full_nodes.end()) {
+                full_nodes.insert(node);
+                full_nodes_num++;
+            }
         }
     }
     
@@ -283,7 +290,7 @@ void CenterServer::CacheReplacementQueue::addNextBestCandidate(const std::string
                 candidates.end(),
                 [](const auto& a, const auto& b) { return a.second < b.second; }
             );
-            
+            // std::cout << "max_candidate: " << max_candidate->first << "  qccv: " << max_candidate->second << std::endl;
             priority_queue_.push(std::make_tuple(
                 max_candidate->second,
                 block_key,
@@ -356,26 +363,6 @@ CenterServer::CacheReplacementQueue::getTopPlacementChoice() {
     }
     
     return std::make_pair(block_key, node);
-}
-
-bool CenterServer::checkNodeCapacity(
-    const std::string& node) {
-    if (node_capacities_.find(node) == node_capacities_.end()) {
-        return false;
-    }
-    
-    auto& node_capacity = node_capacities_[node];
-    
-    return (node_capacity.used_capacity + 1) <= node_capacity.total_capacity;
-}
-
-void CenterServer::updateNodeCapacity(
-    const std::string& node) {
-    if (node_capacities_.find(node) == node_capacities_.end()) {
-        return;
-    }
-    auto& node_capacity = node_capacities_[node];
-    node_capacity.used_capacity++;
 }
 
 void CenterServer::updateSchema(const std::string& datastream_id, const Common::StreamMeta& meta) {
@@ -552,6 +539,7 @@ void CenterServer::executeNodeCacheUpdate(
         block_op->set_operation(cloud_edge_cache::BlockOperation::ADD);
         
         affected_streams.insert(stream_id);
+        // std::cout << "executeNodeCacheUpdate:add block " << block_key << " to node " << edge_server_address << std::endl;
     }
     
     // 处理需要删除的块
@@ -566,6 +554,7 @@ void CenterServer::executeNodeCacheUpdate(
         block_op->set_datastream_unique_id(stream_id);
         block_op->set_block_id(block_id);
         block_op->set_operation(cloud_edge_cache::BlockOperation::REMOVE);
+        // std::cout << "executeNodeCacheUpdate:remove block " << block_key << " from node " << edge_server_address << std::endl;
     }
 
     // 执行远程调用

@@ -34,10 +34,10 @@ tbb::concurrent_hash_map<uint32_t, std::string>& EdgeCacheIndex::queryMainIndex(
     const uint32_t end_blockId, const uint32_t stream_uniqueId) {
     static tbb::concurrent_hash_map<uint32_t, std::string> results;
     results.clear();
-    std::cout << "queryMainIndex start" << start_blockId << " end " << end_blockId << std::endl;
+    // std::cout << "queryMainIndex start" << start_blockId << " end " << end_blockId << std::endl;
     #pragma omp parallel for
     for(const auto& [neighbor_nodeId, index] : timeseries_main_index_) {
-        std::cout << "queryMainIndex neighbor_nodeId " << neighbor_nodeId << std::endl;
+        // std::cout << "queryMainIndex neighbor_nodeId " << neighbor_nodeId << std::endl;
         std::vector<uint32_t> matched_blocks = index->range_query(
             stream_uniqueId, 
             start_blockId, 

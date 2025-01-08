@@ -247,7 +247,7 @@ EdgeServer::createQueryTasks(const std::string& sql_query,
             std::cout << "missing blocks + " << block_id << std::endl;
         } else {
             node_to_blocks[accessor->second].push_back(block_id);
-            std::cout << "finding blocks + " << block_id << std::endl;
+            std::cout << "finding blocks + " << block_id << " in " << accessor->second << std::endl;
         }
         // accessor 会在作用域结束时自动释放
     }
@@ -482,11 +482,11 @@ std::string EdgeServer::addBlockConditions(const std::string& original_sql,
     int64_t start_timestamp = stream_meta.start_time_ + block_id * stream_meta.time_range_;
     int64_t end_timestamp = start_timestamp + stream_meta.time_range_;
     
-    std::cout << "Block " << block_id << " time range calculation:" << std::endl
-              << "  start_time_: " << stream_meta.start_time_ << std::endl
-              << "  time_range_: " << stream_meta.time_range_ << std::endl
-              << "  start_timestamp: " << start_timestamp << std::endl
-              << "  end_timestamp: " << end_timestamp << std::endl;
+    // std::cout << "Block " << block_id << " time range calculation:" << std::endl
+    //           << "  start_time_: " << stream_meta.start_time_ << std::endl
+    //           << "  time_range_: " << stream_meta.time_range_ << std::endl
+    //           << "  start_timestamp: " << start_timestamp << std::endl
+    //           << "  end_timestamp: " << end_timestamp << std::endl;
 
     // 检查时间范围的有效性
     if (end_timestamp <= start_timestamp) {
@@ -614,7 +614,6 @@ grpc::Status EdgeServer::UpdateMetadata(grpc::ServerContext* context,
 
 // 修改后的 updateSchemaInfo 函数
 void EdgeServer::updateSchemaInfo(const google::protobuf::RepeatedPtrField<cloud_edge_cache::StreamMetadata>& metadata) {
-    std::cout << "update schema " << std::endl;
     for (const auto& meta : metadata) {
         Common::StreamMeta stream_meta;
         stream_meta.datastream_id_ = meta.datastream_id();
@@ -653,7 +652,7 @@ void EdgeServer::updateBlockOperations(
             cache_index_->addBlock(op.block_id(), 
                                  src_node_addr,
                                  op.datastream_unique_id());
-            std::cout << "Added block meta" << op.block_id() 
+            std::cout << "Added block meta " << op.block_id() 
                      << " for stream " << op.datastream_unique_id() 
                      << " from node " << src_node_addr << std::endl;
         } else if (op.operation() == cloud_edge_cache::BlockOperation::REMOVE) {
@@ -1208,7 +1207,7 @@ grpc::Status EdgeServer::ForwardNetworkMeasurement(grpc::ServerContext* context,
             
             double base_latency = std::chrono::duration<double>(end_base - start_base).count();
             
-            std::cout << "Base latency: " << base_latency << std::endl;
+            // std::cout << "Base latency: " << base_latency << std::endl;
 
             // 2. 测量总延迟 (包含传输延迟)
             std::this_thread::sleep_for(std::chrono::milliseconds(COOLDOWN_MS));
@@ -1230,13 +1229,13 @@ grpc::Status EdgeServer::ForwardNetworkMeasurement(grpc::ServerContext* context,
             double transmission_delay = total_time - base_latency;
             double bandwidth = static_cast<double>(SAMPLE_SIZE) / (1024 * 1024 * transmission_delay); // MB/s
             
-            std::cout << "Bandwidth: " << bandwidth << " MB/s" << std::endl;
+            // std::cout << "Bandwidth: " << bandwidth << " MB/s" << std::endl;
 
             // 4. 累加结果
             total_bandwidth += bandwidth;
             total_latency += base_latency;
             ++successful_measurements;
-            std::cout << "measure success to " << target_node << std::endl;
+            // std::cout << "measure success to " << target_node << std::endl;
         } catch (const std::exception& e) {
             std::cerr << "Error in measurement to " << target_node 
                       << ": " << e.what() 

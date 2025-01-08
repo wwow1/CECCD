@@ -155,20 +155,11 @@ private:
         }
     };
 
-    // 新增：节点容量管理结构
-    struct NodeCapacity {
-        size_t total_capacity;     // 总容量
-        size_t used_capacity;      // 已使用容量
-        std::unordered_map<std::string, size_t> cached_blocks; // 已缓存的数据块及其大小
-    };
-
-    // 新增：成员变量
-    CacheReplacementQueue replacement_queue_;
-    std::unordered_map<std::string, NodeCapacity> node_capacities_;
-
     // 新增：当前周期的数据块分配记录
     // node_addr -> set<block_id>
     std::unordered_map<std::string, std::unordered_set<std::string>> node_block_allocation_map_;
+
+    CacheReplacementQueue replacement_queue_;
 
     WeightedStats calculateWeightedStats(const std::vector<BlockStats>& history);
     
@@ -197,9 +188,6 @@ private:
     void cacheReplacementLoop();
     void updateAccessHistory(const std::unordered_map<std::string, BlockStats>& period_stats);
     std::unordered_map<std::string, BlockStats> collectPeriodStats();
-
-    bool checkNodeCapacity(const std::string& node);
-    void updateNodeCapacity(const std::string& node);
 
     // 新增：初始化 schema 相关方法
     void initializeSchema();
