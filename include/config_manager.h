@@ -39,6 +39,9 @@ public:
     int64_t getStatisticsReportInterval() const { return statistics_report_interval_s_; }
     int64_t getPredictionPeriod() const { return prediction_period_s_; }
     size_t getBlockSizeMB() const { return block_size_mb_; }
+    const std::string& getLogFilePath() const { return log_file_path_; }
+    const std::string& getEdgeLogLevel() const { return edge_log_level_; }
+    const std::string& getCenterLogLevel() const { return center_log_level_; }
 
     DatabaseConfig getNodeDatabaseConfig(const std::string& node_address) const {
         DatabaseConfig node_db = db_config_;
@@ -65,6 +68,9 @@ private:
     size_t block_size_mb_;
     double edge_capacity_gb_;
     double bloom_filter_fpr_;
+    std::string log_file_path_;
+    std::string edge_log_level_;
+    std::string center_log_level_;
 };
 
 #endif // CONFIG_MANAGER_H 

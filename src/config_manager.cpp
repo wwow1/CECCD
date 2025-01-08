@@ -36,4 +36,11 @@ void ConfigManager::loadConfig(const std::string& config_path) {
 
     // Load bloom filter false positive rate
     bloom_filter_fpr_ = j["cluster"]["bloom_filter_fpr"].get<double>();
+
+    // Load log file path
+    log_file_path_ = j["cluster"]["log_file_path"].get<std::string>();
+
+    // Load log levels
+    edge_log_level_ = j["cluster"]["edge_log_level"].get<std::string>();
+    center_log_level_ = j["cluster"]["center_log_level"].get<std::string>();
 } 

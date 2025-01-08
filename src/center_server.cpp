@@ -3,55 +3,70 @@
 
 CenterServer::CenterServer() {
     auto& config = ConfigManager::getInstance();
+    
+    // 创建控制台和文件 sink
+    auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+    auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(config.getLogFilePath(), true);
+
+    // 创建多重 sink logger
+    auto logger = std::make_shared<spdlog::logger>("center_server_logger", spdlog::sinks_init_list{console_sink, file_sink});
+    spdlog::set_default_logger(logger);
+
+    // 设置日志级别
+    std::string log_level = config.getCenterLogLevel();
+    if (log_level == "debug") {
+        spdlog::set_level(spdlog::level::debug);
+    } else {
+        spdlog::set_level(spdlog::level::info);
+    }
+
+    // 其他初始化代码
     block_size_ = config.getBlockSizeMB() * 1024 * 1024;
     center_addr_ = config.getCenterAddress();
     prediction_period_ = std::chrono::seconds(config.getPredictionPeriod());
     current_period_start_ = std::chrono::system_clock::now();
+
+    spdlog::info("CenterServer initialized with block size: {} bytes", block_size_);
 }
 
 grpc::Status CenterServer::Register(grpc::ServerContext* context,
-                                  const cloud_edge_cache::RegisterRequest* request,
-                                  cloud_edge_cache::Empty* response) {
+                                    const cloud_edge_cache::RegisterRequest* request,
+                                    cloud_edge_cache::Empty* response) {
     std::string node_addr = request->node_address();
     auto& config = ConfigManager::getInstance();
     
     {
         std::lock_guard<std::mutex> lock(nodes_mutex_);
-        // 添加到活跃节点列表
         active_nodes_.insert(node_addr);
-        // 添加到边缘服务器地址列表
         edge_server_addresses_.push_back(node_addr);
         
-        std::cout << "New edge node registered: " << node_addr << std::endl;
+        spdlog::info("New edge node registered: {}", node_addr);
     }
-    // 重新初始化网络度量
     initializeNetworkMetrics();
-    // 通知所有节点更新集群信息
     notifyAllNodes(node_addr);
     
     return grpc::Status::OK;
 }
 
 void CenterServer::initializeNetworkMetrics() {
-    std::cout << "Initializing network metrics..." << std::endl;
+    spdlog::debug("Initializing network metrics...");
     std::lock_guard<std::mutex> lock(nodes_mutex_);
-    std::vector<std::string> all_nodes;
-    all_nodes = edge_server_addresses_;
-    all_nodes.push_back(center_addr_);  // 包含中心节点
-    
+    std::vector<std::string> all_nodes = edge_server_addresses_;
+    all_nodes.push_back(center_addr_);
+
     for (uint32_t i = 0; i < all_nodes.size(); i++) {
         for (uint32_t j = i + 1; j < all_nodes.size(); j++) {
             auto& from_node = all_nodes[i];
             auto& to_node = all_nodes[j];
-            std::cout << "from_node: " << from_node << " to_node: " << to_node << std::endl;
+            spdlog::debug("Measuring network metrics from {} to {}", from_node, to_node);
+
             auto channel = grpc::CreateChannel(from_node, grpc::InsecureChannelCredentials());
             auto stub = cloud_edge_cache::NetworkMetricsService::NewStub(channel);
             
-            // 等待源节点通道就绪
             if (!channel->WaitForConnected(gpr_time_add(
                     gpr_now(GPR_CLOCK_REALTIME),
                     gpr_time_from_seconds(5, GPR_TIMESPAN)))) {
-                std::cerr << "Failed to connect to source node " << from_node << std::endl;
+                spdlog::error("Failed to connect to source node {}", from_node);
                 return;
             }
             
@@ -68,13 +83,12 @@ void CenterServer::initializeNetworkMetrics() {
             network_metrics_[from_node][to_node] = metrics;
             network_metrics_[to_node][from_node] = metrics;
             
-            std::cout << "\nFinal network metrics from " << from_node << " to " << to_node << ":\n"
-                    << "  Average bandwidth: " << metrics.bandwidth << " MB/s\n"
-                    << "  Average latency: " << metrics.latency * 1000 << " ms\n" << std::endl;
+            spdlog::debug("Final network metrics from {} to {}: Average bandwidth: {} MB/s, Average latency: {} ms", 
+                         from_node, to_node, metrics.bandwidth, metrics.latency * 1000);
         }
     }
     
-    std::cout << "Network metrics initialization completed" << std::endl;
+    spdlog::debug("Network metrics initialization completed");
 }
 
 grpc::Status CenterServer::ReportStatistics(grpc::ServerContext* context,
@@ -92,9 +106,7 @@ grpc::Status CenterServer::ReportStatistics(grpc::ServerContext* context,
         stats[server_address].first++;
         stats[server_address].second += block_stat.selectivity();
         
-        std::cout << "Updated stats for block " << key 
-                  << " from " << server_address
-                  << " (selectivity=" << block_stat.selectivity() << ")" << std::endl;
+        spdlog::debug("Updated stats for block {} from {} (selectivity={})", key, server_address, block_stat.selectivity());
     }
     
     return grpc::Status::OK;
@@ -104,6 +116,7 @@ void CenterServer::cacheReplacementLoop() {
     while (true) {
         std::this_thread::sleep_for(prediction_period_);
         
+        spdlog::info("start Cache Replacement");
         // 1. 更新访问统计和预测
         auto period_stats = collectPeriodStats();
         updateAccessHistory(period_stats);
@@ -111,12 +124,10 @@ void CenterServer::cacheReplacementLoop() {
         // 2. 计算QCCV值并生成放置建议
         calculateQCCVs();
         auto new_allocation_plan = generateAllocationPlan();
-        
-        std::cout << "\nstart executeCacheReplacement" << std::endl;
         // 3. 执行缓存替换
         executeCacheReplacement(new_allocation_plan);
         
-        std::cout << "Cache replacement loop iteration completed" << std::endl;
+        spdlog::info("Cache replacement loop iteration completed");
     }
 }
 
@@ -209,7 +220,7 @@ CenterServer::generateAllocationPlan() {
             used_node_capacities[node]++;
         } else {
             replacement_queue_.addNextBestCandidate(block_key);
-            std::cout << "Node " << node << " is full, adding block " << block_key << " to replacement queue" << std::endl;
+            spdlog::debug("Node {} is full, adding block {} to replacement queue", node, block_key);
             if (full_nodes.find(node) == full_nodes.end()) {
                 full_nodes.insert(node);
                 full_nodes_num++;
@@ -246,8 +257,7 @@ double CenterServer::getNetworkBandwidth(const std::string& from_node, const std
     if (network_metrics_.count(from_node) && network_metrics_[from_node].count(to_node)) {
         return network_metrics_[from_node][to_node].bandwidth;
     }
-    std::cerr << "Warning: No bandwidth data for " << from_node << " -> " << to_node 
-              << ", using default value" << std::endl;
+    spdlog::error("Warning: No bandwidth data for {} -> {}, using default value", from_node, to_node);
     return 100.0;  // 默认值
 }
 
@@ -255,8 +265,7 @@ double CenterServer::getNetworkLatency(const std::string& from_node, const std::
     if (network_metrics_.count(from_node) && network_metrics_[from_node].count(to_node)) {
         return network_metrics_[from_node][to_node].latency;
     }
-    std::cerr << "Warning: No latency data for " << from_node << " -> " << to_node 
-              << ", using default value" << std::endl;
+    spdlog::error("Warning: No latency data for {} -> {}, using default value", from_node, to_node);
     return 0.01;  // 默认值
 }
 
@@ -306,7 +315,7 @@ void CenterServer::CacheReplacementQueue::buildPriorityQueue() {
         priority_queue_.pop();
     }
     
-    std::cout << "\nBuilding priority queue with candidates:" << std::endl;
+    spdlog::debug("\nBuilding priority queue with candidates:");
     
     // 首先收集所有的 block keys（workaround）
     std::vector<std::string> block_keys;
@@ -314,7 +323,7 @@ void CenterServer::CacheReplacementQueue::buildPriorityQueue() {
         tbb::concurrent_hash_map<std::string, std::vector<std::pair<std::string, double>>>::const_accessor accessor;
         for (auto it = block_candidates_.begin(); it != block_candidates_.end(); ++it) {
             block_keys.push_back(it->first);
-            std::cout << "Found block " << it->first << " with " << it->second.size() << " candidates" << std::endl;
+            spdlog::debug("Found block {} with {} candidates", it->first, it->second.size());
         }
     }
     
@@ -324,11 +333,11 @@ void CenterServer::CacheReplacementQueue::buildPriorityQueue() {
     }
     
     // 打印最终队列内容
-    std::cout << "\nFinal priority queue contents:" << std::endl;
+    spdlog::debug("\nFinal priority queue contents:");
     auto temp_queue = priority_queue_;
     while (!temp_queue.empty()) {
         auto [qccv, block_key, node] = temp_queue.top();
-        std::cout << "QCCV: " << qccv << ", Block: " << block_key << ", Node: " << node << std::endl;
+        spdlog::debug("QCCV: {}, Block: {}, Node: {}", qccv, block_key, node);
         temp_queue.pop();
     }
 }
@@ -336,15 +345,14 @@ void CenterServer::CacheReplacementQueue::buildPriorityQueue() {
 std::optional<std::pair<std::string, std::string>> 
 CenterServer::CacheReplacementQueue::getTopPlacementChoice() {
     if (priority_queue_.empty()) {
-        std::cout << "Priority queue is empty" << std::endl;
+        spdlog::info("Priority queue is empty");
         return std::nullopt;
     }
     
     auto [qccv, block_key, node] = priority_queue_.top();
     priority_queue_.pop();
     
-    std::cout << "Getting top placement choice: Block " << block_key 
-              << " -> Node " << node << " (QCCV: " << qccv << ")" << std::endl;
+    spdlog::debug("Getting top placement choice: Block {} -> Node {} (QCCV: {})", block_key, node, qccv);
     
     // 使用 accessor 来访问 block_candidates_
     tbb::concurrent_hash_map<std::string, std::vector<std::pair<std::string, double>>>::accessor accessor;
@@ -357,9 +365,7 @@ CenterServer::CacheReplacementQueue::getTopPlacementChoice() {
             ),
             candidates.end()
         );
-        std::cout << "Removed candidate for block " << block_key 
-                  << " (candidates before: " << before_size 
-                  << ", after: " << candidates.size() << ")" << std::endl;
+        spdlog::debug("Removed candidate for block {}, (candidates before: {}, after: {})", block_key, before_size, candidates.size());
     }
     
     return std::make_pair(block_key, node);
@@ -403,7 +409,7 @@ void CenterServer::Start(const std::string& server_address) {
     builder.RegisterService(static_cast<cloud_edge_cache::EdgeToEdge::Service*>(this));
     
     std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
-    std::cout << "Center server is running on " << server_address << std::endl;
+    spdlog::info("Center server is running on {}", server_address);
     
     // 启动预测循环
     std::thread(&CenterServer::cacheReplacementLoop, this).detach();
@@ -571,13 +577,9 @@ void CenterServer::executeNodeCacheUpdate(
             node_block_allocation_map_[edge_server_address].erase(block);
         }
         
-        std::cout << "Successfully updated cache on " << edge_server_address 
-                  << " (+" << blocks_to_add.size()
-                  << "/-" << blocks_to_remove.size() 
-                  << " blocks)" << std::endl;
+        spdlog::info("Successfully updated cache on {}, (+{}/-{} blocks)", edge_server_address, blocks_to_add.size(), blocks_to_remove.size());
     } else {
-        std::cerr << "Failed to update cache on " << edge_server_address
-                  << ": " << status.error_message() << std::endl;
+        spdlog::error("Failed to update cache on {}, {}", edge_server_address, status.error_message());
     }
 }
 
@@ -591,14 +593,13 @@ uint64_t CenterServer::calculateTimeRange(const std::string& table_name, size_t 
     
     uint64_t time_difference = time_diff[1]["date_time"].as<uint64_t>() - 
                               time_diff[0]["date_time"].as<uint64_t>();
-    std::cout << "time_difference: " << time_difference 
-              << " rows_per_block: " << rows_per_block << std::endl;
+    spdlog::info("time_difference: {} rows_per_block: {}", time_difference, rows_per_block);
     return time_difference * rows_per_block;
 }
 
 void CenterServer::initializeSchema() {
     auto& db_config = ConfigManager::getInstance().getDatabaseConfig();
-    std::cout << "Database config: " << db_config.getConnectionString() << std::endl;
+    spdlog::info("Database config: {}", db_config.getConnectionString());
     pqxx::connection conn(db_config.getConnectionString());
     pqxx::work txn(conn);
 
@@ -633,13 +634,7 @@ void CenterServer::initializeSchema() {
         meta.time_range_ = time_range;
         updateSchema(table_name, meta);
         
-        std::cout << "Updated schema for table " << table_name 
-                  << "\n  unique_id: " << unique_id 
-                  << "\n  start_time: " << start_time 
-                  << "\n  time_range: " << time_range
-                  << "\n  avg_row_size: " << avg_row_size 
-                  << "\n  rows_per_block: " << rows_per_block 
-                  << std::endl;
+        spdlog::info("Updated schema for table {}, unique_id {}, start_time {}, time_range {}, avg_row_size {}, rows_per_block {}", table_name, unique_id, start_time, time_range, avg_row_size, rows_per_block);
     }
 }
 
@@ -662,7 +657,7 @@ void CenterServer::notifyAllNodes(const std::string& new_node) {
         std::lock_guard<std::mutex> lock(schema_mutex_);
         // 遍历所有 schema 数据
         for (const auto& [stream_id, meta] : schema_) {
-            std::cout << "notify schema stream_id " <<  stream_id << " to all nodes" << std::endl;
+            spdlog::info("notify schema stream_id {}", stream_id);
             auto* stream_meta = update.add_stream_metadata();
             stream_meta->set_datastream_id(meta.datastream_id_);
             stream_meta->set_unique_id(meta.unique_id_);
@@ -682,9 +677,9 @@ void CenterServer::notifyAllNodes(const std::string& new_node) {
         auto status = stub->UpdateClusterNodes(&context, update, &response);
         
         if (!status.ok()) {
-            std::cerr << "Failed to notify node " << node << ": " << status.error_message() << std::endl;
+            spdlog::error("Failed to notify node {}, {}", node, status.error_message());
         } else {
-            std::cout << "Successfully notified node " << node << " of cluster update" << std::endl;
+            spdlog::info("Successfully notified node {} of cluster update", node);
         }
     }
 }
@@ -713,7 +708,7 @@ grpc::Status CenterServer::ForwardNetworkMeasurement(grpc::ServerContext* contex
             if (!channel->WaitForConnected(gpr_time_add(
                     gpr_now(GPR_CLOCK_REALTIME),
                     gpr_time_from_seconds(5, GPR_TIMESPAN)))) {
-                std::cerr << "Failed to connect to target node " << target_node << std::endl;
+                spdlog::error("Failed to connect to target node {}", target_node);
                 return grpc::Status(grpc::StatusCode::UNAVAILABLE, "Failed to connect to target node");
             }
 
@@ -756,9 +751,7 @@ grpc::Status CenterServer::ForwardNetworkMeasurement(grpc::ServerContext* contex
             ++successful_measurements;
             
         } catch (const std::exception& e) {
-            std::cerr << "Error in measurement to " << target_node 
-                      << ": " << e.what() 
-                      << "\nChannel state: " << channel->GetState(true) << std::endl;
+            spdlog::error("Error in measurement to {}, {}", target_node, e.what());
         }
         
         // 测量间隔
@@ -788,7 +781,7 @@ grpc::Status CenterServer::ExecuteNetworkMeasurement(grpc::ServerContext* contex
 grpc::Status CenterServer::SubQuery(grpc::ServerContext* context,
                                 const cloud_edge_cache::QueryRequest* request,
                                 cloud_edge_cache::SubQueryResponse* response) {
-    std::cout << "Center received SubQuery request" << " sql_query = " << request->sql_query() << " block_id = " << request->block_id() << " stream_unique_id = " << request->stream_unique_id() << std::endl;
+    spdlog::info("Center received SubQuery request sql_query = {} block_id = {} stream_unique_id = {}", request->sql_query(), request->block_id(), request->stream_unique_id());
     try {
         auto& config = ConfigManager::getInstance();
         std::string conn_str = config.getNodeDatabaseConfig(center_addr_).getConnectionString();
@@ -828,7 +821,7 @@ grpc::Status CenterServer::SubQuery(grpc::ServerContext* context,
 
         return grpc::Status::OK;
     } catch (const std::exception& e) {
-        std::cerr << "Error in SubQuery: " << e.what() << std::endl;
+        spdlog::error("Error in SubQuery: {}", e.what());
         response->set_status(cloud_edge_cache::SubQueryResponse::ERROR);
         response->set_error_message(e.what());
         return grpc::Status(grpc::StatusCode::INTERNAL, e.what());

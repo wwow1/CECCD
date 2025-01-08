@@ -1,22 +1,39 @@
 #include "edge_server.h"
+
 EdgeServer::EdgeServer() {
-    // 加载配置
     auto& config = ConfigManager::getInstance();
     
+    // 创建控制台和文件 sink
+    auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+    auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(config.getLogFilePath(), true);
+
+    // 创建多重 sink logger
+    auto logger = std::make_shared<spdlog::logger>("edge_server_logger", spdlog::sinks_init_list{console_sink, file_sink});
+    spdlog::set_default_logger(logger);
+
+    // 设置日志级别
+    std::string log_level = config.getEdgeLogLevel();
+    if (log_level == "debug") {
+        spdlog::set_level(spdlog::level::debug);
+    } else {
+        spdlog::set_level(spdlog::level::info);
+    }
+
+    // 其他初始化代码
     block_size_ = config.getBlockSizeMB() * 1024 * 1024;
-    // 获取中心节点地址
     center_addr_ = config.getCenterAddress();
     // center_latency_ = measureLatency(center_addr_);
     // 测试专用
     center_latency_ = 100;
-    std::cout << "Center node latency: " << center_latency_ << "ms" << std::endl;
-    
-    // 初始化缓存索引
+    spdlog::info("Center node latency: {}ms", center_latency_);
+
     cache_index_ = std::make_unique<EdgeCacheIndex>();
     neighbor_addrs_.insert(center_addr_);
     cache_index_->setNodeLatency(server_address_, 0);
     cache_index_->setNodeLatency(center_addr_, center_latency_);
     cache_index_->setLatencyThreshold(config.getIndexLatencyThresholdMs());
+
+    spdlog::debug("EdgeServer initialized with block size: {} bytes", block_size_);
 }
 
 EdgeServer::~EdgeServer() {
@@ -25,6 +42,7 @@ EdgeServer::~EdgeServer() {
     if (stats_report_thread_.joinable()) {
         stats_report_thread_.join();
     }
+    spdlog::info("EdgeServer destroyed");
 }
 
 void EdgeServer::statsReportLoop() {
@@ -43,6 +61,7 @@ void EdgeServer::statsReportLoop() {
         // 如果有统计信息需要上报，则执行上报
         if (!info_to_report.empty()) {
             ReportStatistics(info_to_report);
+            spdlog::debug("Reported {} statistics", info_to_report.size());
         }
         
         // 等待下一个上报周期
@@ -101,14 +120,13 @@ int64_t EdgeServer::measureLatency(const std::string& address) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             
         } catch (const std::exception& e) {
-            std::cerr << "Error measuring latency to " << address << ": " << e.what() << std::endl;
+            spdlog::error("Error measuring latency to {}: {}", address, e.what());
         }
     }
 
     if (successful_measurements == 0) {
         throw std::runtime_error("Failed to measure latency to node: " + address);
     }
-    std::cout << "successful_measurements " << successful_measurements << std::endl;
     return total_latency / successful_measurements;
 }
 
@@ -119,15 +137,13 @@ grpc::Status EdgeServer::Query(grpc::ServerContext* context,
                                cloud_edge_cache::QueryResponse* response) {
     // 解析SQL查询
     auto [table_name, start_timestamp, end_timestamp] = parseSQLQuery(request->sql_query());
-    std::cout << "Qirgin Query: " << request->sql_query()
-              << " Query for table: " << table_name 
-              << ", timestamp range: [" << start_timestamp << ", " << end_timestamp << "]" << std::endl;
+    spdlog::info("Qirgin Query: {} Query for table: {}, timestamp range: [{}, {}]", request->sql_query(), table_name, start_timestamp, end_timestamp);
 
     auto stream_meta_exist = getStreamMeta(table_name);
 
     // 如果schema不存在，直接转发到中心节点
     if (!stream_meta_exist) {
-        std::cout << "Stream metadata not found: " << table_name << ". Forwarding to center node." << std::endl;
+        spdlog::info("Stream metadata not found: {}. Forwarding to center node.", table_name);
         auto sub_response = executeSubQuery(center_addr_, request->sql_query(), 0, 0);
         if (sub_response.status() == cloud_edge_cache::SubQueryResponse::OK) {
             response->CopyFrom(sub_response.result());
@@ -138,7 +154,7 @@ grpc::Status EdgeServer::Query(grpc::ServerContext* context,
     // 获取数据块范围
     auto [start_block, end_block] = getBlockRange(table_name, start_timestamp, end_timestamp);
     
-    std::cout << " start_block " << start_block << " end_block " << end_block << std::endl;
+    spdlog::debug(" start_block {} end_block {}", start_block, end_block);
 
     // 创建并执行分布式查询任务
     auto query_tasks = createQueryTasks(request->sql_query(), 
@@ -173,8 +189,7 @@ std::vector<cloud_edge_cache::QueryResponse> EdgeServer::processQueryResults(
             }
                 
             case cloud_edge_cache::SubQueryResponse_Status_FALSE_POSITIVE: {
-                std::cout << "False positive detected for block " << task.block_id 
-                         << " on node " << task.node_id << ", retrying from center node" << std::endl;
+                spdlog::info("False positive detected for block {} on node {}, retrying from center node", task.block_id, task.node_id);
                 
                 auto retry_response = executeSubQuery(center_addr_, 
                                                     task.sql_query,
@@ -185,14 +200,13 @@ std::vector<cloud_edge_cache::QueryResponse> EdgeServer::processQueryResults(
                     && retry_response.has_result()) {
                     all_results.push_back(retry_response.result());
                 } else {
-                    std::cerr << "Failed to retry query from center node for block " 
-                             << task.block_id << std::endl;
+                    spdlog::error("Failed to retry query from center node for block {}", task.block_id);
                 }
                 break;
             }
                 
             case cloud_edge_cache::SubQueryResponse_Status_ERROR: {
-                std::cerr << "SubQuery failed: " << sub_response.error_message() << std::endl;
+                spdlog::error("SubQuery failed: {}", sub_response.error_message());
                 break;
             }
         }
@@ -244,10 +258,10 @@ EdgeServer::createQueryTasks(const std::string& sql_query,
         typename tbb::concurrent_hash_map<uint32_t, std::string>::const_accessor accessor;
         if (!node_blocks.find(accessor, block_id)) {
             missing_blocks.push_back(block_id);
-            std::cout << "missing blocks + " << block_id << std::endl;
+            spdlog::info("missing blocks + {}", block_id);
         } else {
             node_to_blocks[accessor->second].push_back(block_id);
-            std::cout << "finding blocks + " << block_id << " in " << accessor->second << std::endl;
+            spdlog::info("finding blocks + {} in {}", block_id, accessor->second);
         }
         // accessor 会在作用域结束时自动释放
     }
@@ -472,7 +486,7 @@ std::string EdgeServer::addBlockConditions(const std::string& original_sql,
     // 获取数据源元数据
     auto stream_meta_exist = getStreamMeta(datastream_id);
     if (!stream_meta_exist) {
-        std::cerr << "Stream metadata not found: " << datastream_id << std::endl;
+        spdlog::error("Stream metadata not found: {}", datastream_id);
         return original_sql;
     }
 
@@ -490,8 +504,7 @@ std::string EdgeServer::addBlockConditions(const std::string& original_sql,
 
     // 检查时间范围的有效性
     if (end_timestamp <= start_timestamp) {
-        std::cerr << "Error: Invalid time range calculation for block " << block_id 
-                  << ": end_timestamp <= start_timestamp" << std::endl;
+        spdlog::error("Error: Invalid time range calculation for block {}: end_timestamp <= start_timestamp", block_id);
         return original_sql;
     }
 
@@ -571,7 +584,7 @@ void EdgeServer::parseWhereClause(const hsql::Expr* expr,
             parseWhereClause(expr->expr2, start_timestamp, end_timestamp);
         } else if (expr->opType == hsql::kOpOr) {
             // OR 条件可能会使时间范围失效，这里选择保持最宽松的范围
-            std::cout << "Warning: OR condition detected, using widest possible date_time range" << std::endl;
+            spdlog::warn("Warning: OR condition detected, using widest possible date_time range");
             start_timestamp = std::numeric_limits<int64_t>::min();
             end_timestamp = std::numeric_limits<int64_t>::max();
         } else {
@@ -605,7 +618,7 @@ grpc::Status EdgeServer::UpdateMetadata(grpc::ServerContext* context,
                                       const cloud_edge_cache::UpdateCacheMeta* request,
                                       cloud_edge_cache::Empty* response) {
     std::string src_node_addr = request->src_node_addr();
-    std::cout << "Received metadata update from " << src_node_addr << std::endl;
+    spdlog::debug("Received metadata update from {}", src_node_addr);
     // 处理块操作
     updateBlockOperations(request->block_operations(), src_node_addr);
 
@@ -620,9 +633,7 @@ void EdgeServer::updateSchemaInfo(const google::protobuf::RepeatedPtrField<cloud
         stream_meta.unique_id_ = meta.unique_id();
         stream_meta.start_time_ = meta.start_time();
         stream_meta.time_range_ = meta.time_range();
-        std::cout << "update schema for table " << stream_meta.datastream_id_
-                  << " unique_id_ " << stream_meta.unique_id_
-                  << " start_time_" << stream_meta.start_time_ << std::endl;
+        spdlog::info("update schema for table {} unique_id_ {} start_time_{}", stream_meta.datastream_id_, stream_meta.unique_id_, stream_meta.start_time_);
         
         // Check if the schema already exists
         typename tbb::concurrent_hash_map<std::string, Common::StreamMeta>::accessor accessor;
@@ -652,16 +663,12 @@ void EdgeServer::updateBlockOperations(
             cache_index_->addBlock(op.block_id(), 
                                  src_node_addr,
                                  op.datastream_unique_id());
-            std::cout << "Added block meta " << op.block_id() 
-                     << " for stream " << op.datastream_unique_id() 
-                     << " from node " << src_node_addr << std::endl;
+            spdlog::debug("Added block meta {} for stream {} from node {}", op.block_id(), op.datastream_unique_id(), src_node_addr);
         } else if (op.operation() == cloud_edge_cache::BlockOperation::REMOVE) {
             cache_index_->removeBlock(op.block_id(),
                                     src_node_addr,
                                     op.datastream_unique_id());
-            std::cout << "Removed block meta" << op.block_id() 
-                     << " for stream " << op.datastream_unique_id() 
-                     << " from node " << src_node_addr << std::endl;
+            spdlog::debug("Removed block meta{} for stream {} from node {}", op.block_id(), op.datastream_unique_id(), src_node_addr);
         }
     }
 }
@@ -682,7 +689,7 @@ void EdgeServer::ensureTableExists(const std::string& table_name,
     check_txn.commit();
     
     if (!table_exists) {
-        std::cout << "Table " << table_name << " does not exist, creating..." << std::endl;
+        spdlog::info("Table {} does not exist, creating...", table_name);
         
         // 从中心节点获取表结构
         pqxx::work center_txn(center_conn);
@@ -701,7 +708,7 @@ void EdgeServer::ensureTableExists(const std::string& table_name,
         
         // 构造并执行创建表的SQL
         std::string create_table_query = buildCreateTableQuery(table_name, schema_info);
-        std::cout << "create_table_query = " << create_table_query << std::endl;
+        spdlog::info("create_table_query = {}", create_table_query);
         pqxx::work create_txn(local_conn);
         create_txn.exec(create_table_query);
         create_txn.commit();
@@ -743,7 +750,7 @@ void EdgeServer::addDataBlock(const std::string& table_name,
         " AND date_time < " + std::to_string(block_end_time);
     
     pqxx::result rows = center_txn.exec(select_query);
-    std::cout << "addDataBlock select_query = " << select_query << std::endl;
+    spdlog::debug("addDataBlock select_query = {}", select_query);
     if (!rows.empty()) {
         std::string insert_query = buildInsertQuery(table_name, rows);
         local_txn.exec(insert_query);
@@ -792,7 +799,7 @@ void EdgeServer::removeDataBlock(const std::string& table_name,
         "DELETE FROM " + table_name + 
         " WHERE date_time >= " + std::to_string(block_start_time) + 
         " AND date_time < " + std::to_string(block_end_time);
-    
+    spdlog::debug("removeDataBlock delete_query = {}", delete_query);
     local_txn.exec(delete_query);
     local_txn.commit();
 }
@@ -829,14 +836,16 @@ grpc::Status EdgeServer::ReplaceCache(grpc::ServerContext* context,
                 try {
                     if (op.operation() == cloud_edge_cache::BlockOperation::ADD) {
                         ensureTableExists(table_name, local_conn, center_conn);
+                        spdlog::info("addDataBlock table_name = {}, datastream_unique_id = {}, block_id = {}", table_name, op.datastream_unique_id(), op.block_id());
                         addDataBlock(table_name, block_start_time, block_end_time, 
                                    local_conn, center_conn);
                     } else if (op.operation() == cloud_edge_cache::BlockOperation::REMOVE) {
+                        spdlog::info("removeDataBlock table_name = {}, datastream_unique_id = {}, block_id = {}", table_name, op.datastream_unique_id(), op.block_id());
                         removeDataBlock(table_name, block_start_time, block_end_time, 
                                       local_conn);
                     }
                 } catch (const std::exception& e) {
-                    std::cerr << "Error processing block operation: " << e.what() << std::endl;
+                    spdlog::error("Error processing block operation: {}", e.what());
                     return grpc::Status(grpc::StatusCode::INTERNAL, 
                                       "Failed to process block operation: " + std::string(e.what()));
                 }
@@ -849,14 +858,14 @@ grpc::Status EdgeServer::ReplaceCache(grpc::ServerContext* context,
             }
         }
     } catch (const std::exception& e) {
-        std::cerr << "Database connection error: " << e.what() << std::endl;
+        spdlog::error("Database connection error: {}", e.what());
         return grpc::Status(grpc::StatusCode::INTERNAL, 
                           "Database connection error: " + std::string(e.what()));
     }
     
     // 向所有邻居节点推送更新
     for (const auto& neighbor : neighbor_addrs_) {
-        std::cout << "PushMetadataUpdate to neighbor " << neighbor << std::endl;
+        spdlog::debug("PushMetadataUpdate to neighbor {}", neighbor);
         PushMetadataUpdate(update_meta, neighbor);
     }
 
@@ -881,7 +890,7 @@ void EdgeServer::Start(const std::string& server_address) {
     builder.RegisterService(static_cast<cloud_edge_cache::CenterToEdge::Service*>(this));
     builder.RegisterService(static_cast<cloud_edge_cache::NetworkMetricsService::Service*>(this));
     std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
-    std::cout << "Edge server is running on " << server_address << std::endl;
+    spdlog::info("Edge server is running on {}", server_address);
     // 向中心节点注册
     registerWithCenter();
     server->Wait();
@@ -900,10 +909,9 @@ void EdgeServer::PushMetadataUpdate(const cloud_edge_cache::UpdateCacheMeta& upd
     auto status = stub->UpdateMetadata(&context, update_meta, &response);
     
     if (status.ok()) {
-        std::cout << "Successfully pushed metadata update to " << target_server_address << std::endl;
+        spdlog::debug("Successfully pushed metadata update to {}", target_server_address);
     } else {
-        std::cerr << "Failed to push metadata update to " << target_server_address 
-                  << ": " << status.error_message() << std::endl;
+        spdlog::error("Failed to push metadata update to {}: {}", target_server_address, status.error_message());
     }
 }
 
@@ -926,9 +934,9 @@ void EdgeServer::ReportStatistics(std::vector<cloud_edge_cache::BlockAccessInfo>
     grpc::ClientContext context;
     auto status = stub->ReportStatistics(&context, request, &response);
     if (status.ok()) {
-        std::cout << "Successfully reported statistics to center server" << std::endl;
+        spdlog::debug("Successfully reported statistics to center server");
     } else {
-        std::cerr << "Failed to report statistics: " << status.error_message() << std::endl;
+        spdlog::error("Failed to report statistics: {}", status.error_message());
     }
 }
 
@@ -1005,7 +1013,7 @@ grpc::Status EdgeServer::SubQuery(grpc::ServerContext* context,
 
         return grpc::Status::OK;
     } catch (const std::exception& e) {
-        std::cerr << "Error in SubQuery: " << e.what() << std::endl;
+        spdlog::error("Error in SubQuery: {}", e.what());
         response->set_status(cloud_edge_cache::SubQueryResponse::ERROR);
         response->set_error_message(e.what());
         return grpc::Status(grpc::StatusCode::INTERNAL, e.what());
@@ -1024,7 +1032,7 @@ cloud_edge_cache::SubQueryResponse EdgeServer::executeSubQuery(const std::string
     if (!channel->WaitForConnected(gpr_time_add(
             gpr_now(GPR_CLOCK_REALTIME),
             gpr_time_from_seconds(5, GPR_TIMESPAN)))) {
-        std::cerr << "Failed to connect to node: " << node_id << std::endl;
+        spdlog::error("Failed to connect to node: {}", node_id);
         throw std::runtime_error("Connection failed");
     }
     
@@ -1040,15 +1048,14 @@ cloud_edge_cache::SubQueryResponse EdgeServer::executeSubQuery(const std::string
     auto status = stub->SubQuery(&context, request, &response);
 
     if (!status.ok()) {
-        std::cerr << "RPC failed: " << status.error_message() 
-                  << " (code=" << status.error_code() << ")" << std::endl;
+        spdlog::error("RPC failed: {} (code={})", status.error_message(), status.error_code());
         throw std::runtime_error("RPC failed: " + status.error_message());
     }
 
     switch (response.status()) {
         case cloud_edge_cache::SubQueryResponse::FALSE_POSITIVE:
             // 处理假阳性情况，可以考虑从中心节点获取数据
-            std::cout << "False positive detected for block " << block_id << " on node " << node_id << std::endl;
+            spdlog::info("False positive detected for block {} on node {}", block_id, node_id);
             break;
             
         case cloud_edge_cache::SubQueryResponse::OK:
@@ -1106,14 +1113,13 @@ void EdgeServer::registerWithCenter() {
     if (!status.ok()) {
         throw std::runtime_error("Failed to register with center node: " + status.error_message());
     }
-    std::cout << "Successfully registered with center node" << std::endl;
+    spdlog::info("Successfully registered with center node");
 }
 
 // 实现更新集群节点信息的 gRPC 方法
 grpc::Status EdgeServer::UpdateClusterNodes(grpc::ServerContext* context,
                                           const cloud_edge_cache::ClusterNodesUpdate* request,
                                           cloud_edge_cache::Empty* response) {
-    std::cout << "UpdateClusterNodes" << std::endl;
     std::set<std::string> new_neighbors;
 
     // 获取当前的邻居节点列表（用于检查）
@@ -1133,21 +1139,20 @@ grpc::Status EdgeServer::UpdateClusterNodes(grpc::ServerContext* context,
             if (current_neighbors.find(node_addr) != current_neighbors.end()) {
                 // 已知邻居节点，直接使用缓存的延迟值
                 node_latency = cache_index_->getNodeLatency(node_addr);
-                std::cout << "Using cached latency for node " << node_addr << ": " << node_latency << "ms" << std::endl;
+                spdlog::debug("Using cached latency for node {}: {}ms", node_addr, node_latency);
             } else {
                 // 新节点，需要测量延迟
                 node_latency = measureLatency(node_addr);
-                std::cout << "Measured new node " << node_addr << " latency: " << node_latency << "ms" << std::endl;
+                spdlog::debug("Measured new node {} latency: {}ms", node_addr, node_latency);
             }
 
             // 如果节点延迟小于中心节点延迟，将其添加为邻居
             if (node_latency < center_latency_) {
                 new_neighbors.insert(node_addr);
                 cache_index_->setNodeLatency(node_addr, node_latency);
-                std::cout << "Added " << node_addr << " as neighbor" << std::endl;
             }
         } catch (const std::exception& e) {
-            std::cerr << "Failed to measure latency to " << node_addr << ": " << e.what() << std::endl;
+            spdlog::error("Failed to measure latency to {}: {}", node_addr, e.what());
         }
     }
 
@@ -1161,7 +1166,7 @@ grpc::Status EdgeServer::UpdateClusterNodes(grpc::ServerContext* context,
     }
 
     for (const auto& node : neighbor_addrs_) {
-        std::cout << "Node " << node << " added to neighbor_addrs_" << std::endl;
+        spdlog::info("Node {} added to neighbor_addrs_", node);
     }
     return grpc::Status::OK;
 }
@@ -1189,7 +1194,7 @@ grpc::Status EdgeServer::ForwardNetworkMeasurement(grpc::ServerContext* context,
             if (!channel->WaitForConnected(gpr_time_add(
                     gpr_now(GPR_CLOCK_REALTIME),
                     gpr_time_from_seconds(5, GPR_TIMESPAN)))) {
-                std::cerr << "Failed to connect to target node " << target_node << std::endl;
+                spdlog::error("Failed to connect to target node {}", target_node);
                 return grpc::Status(grpc::StatusCode::UNAVAILABLE, "Failed to connect to target node");
             }
 
@@ -1237,9 +1242,7 @@ grpc::Status EdgeServer::ForwardNetworkMeasurement(grpc::ServerContext* context,
             ++successful_measurements;
             // std::cout << "measure success to " << target_node << std::endl;
         } catch (const std::exception& e) {
-            std::cerr << "Error in measurement to " << target_node 
-                      << ": " << e.what() 
-                      << "\nChannel state: " << channel->GetState(true) << std::endl;
+            spdlog::error("Error in measurement to {}: {}", target_node, e.what());
         }
         
         // 测量间隔

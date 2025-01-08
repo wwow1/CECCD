@@ -8,7 +8,10 @@
         "bloom_filter_fpr": 0.01,
         "index_latency_threshold_ms": 30,
         "statistics_report_interval_s": 10,
-        "prediction_period_s": 60
+        "prediction_period_s": 60,
+        "log_file_path": "/tmp/server.log",
+        "edge_log_level": "debug",
+        "center_log_level": "debug"
     },
     "database": {
         "host": "localhost",

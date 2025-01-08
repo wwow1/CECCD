@@ -14,6 +14,7 @@ include_directories(
 find_package(Protobuf CONFIG REQUIRED)
 find_package(gRPC CONFIG REQUIRED)
 find_package(TBB REQUIRED)
+find_package(spdlog REQUIRED)
 
 # 添加这些变量定义
 set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:gRPC::grpc_cpp_plugin>)
@@ -79,6 +80,7 @@ target_link_libraries(client
     nlohmann_json::nlohmann_json
     pqxx
     sqlparser
+    spdlog::spdlog
 )
 target_include_directories(client
     PUBLIC
@@ -108,6 +110,7 @@ target_link_libraries(edge_server
     pqxx
     sqlparser
     nlohmann_json::nlohmann_json
+    spdlog::spdlog
 )
 target_include_directories(edge_server
     PUBLIC
@@ -137,6 +140,7 @@ target_link_libraries(center_server
     TBB::tbb
     nlohmann_json::nlohmann_json
     pqxx
+    spdlog::spdlog
 )
 target_include_directories(center_server
     PUBLIC

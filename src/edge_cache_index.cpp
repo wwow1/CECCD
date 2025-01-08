@@ -5,12 +5,10 @@
 
 std::unique_ptr<Common::BaseIndex> EdgeCacheIndex::createIndex(const std::string& nodeId) {
     if (node_latencies_[nodeId] >= config_latency_threshold_ms_) {
-        std::cout << "Using MixIndex for node " << nodeId << " (latency: " 
-                  << node_latencies_[nodeId] << "ms)" << std::endl;
+        spdlog::info("Using MixIndex for node {} (latency: {}ms)", nodeId, node_latencies_[nodeId]);
         return std::make_unique<MixIndex>();
     } else {
-        std::cout << "Using BloomFilter for node " << nodeId << " (latency: " 
-                  << node_latencies_[nodeId] << "ms)" << std::endl;
+        spdlog::info("Using BloomFilter for node {} (latency: {}ms)", nodeId, node_latencies_[nodeId]);
         return std::make_unique<MyBloomFilter>();
     }
 }
