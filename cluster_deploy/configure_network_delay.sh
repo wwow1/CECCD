@@ -49,8 +49,7 @@ for host in $(python3 -c "from config import cluster_config; print(' '.join(h['i
     # 使用Here文档方式执行远程命令
     ssh "root@$host" /bin/bash << EOF
         cd /tmp
-        bash setup_delay.sh "$CENTER_IP" "$edge_ips_str"
-    echo "bash setup_delay.sh $CENTER_IP $edge_ips_str"
+        bash setup_delay.sh ${CENTER_IP} ${edge_ips_str}
 EOF
 done
 

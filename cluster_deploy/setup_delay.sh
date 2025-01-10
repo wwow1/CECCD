@@ -5,9 +5,14 @@ CENTER_IP=$1
 shift
 declare -A EDGE_IPS
 for pair in "$@"; do
-    node_num=${pair%%:*}
-    ip=${pair#*:}
-    EDGE_IPS[$node_num]=$ip
+    # 确保只取冒号前后的部分
+    node_num=$(echo "$pair" | cut -d':' -f1)
+    ip=$(echo "$pair" | cut -d':' -f2)
+    # 确保 IP 地址格式正确
+    if [[ $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        EDGE_IPS[$node_num]=$ip
+        #echo "EDGE_IPS[$node_num]: $ip"
+    fi
 done
 
 # 从配置文件获取延迟信息
@@ -50,6 +55,7 @@ else
     exit 0
 fi
 
+#set -x
 for container in $LOCAL_CONTAINERS; do
     echo ""
     echo "----------------------------------------"
@@ -121,6 +127,7 @@ for container in $LOCAL_CONTAINERS; do
         
         # 配置到其他边缘节点的延迟
         rule_id=2
+        echo "EDGE_IPS: ${EDGE_IPS[@]}"
         for other_id in "${!EDGE_IPS[@]}"; do
             if [ "$node_id" != "$other_id" ]; then
                 other_ip=${EDGE_IPS[$other_id]}
