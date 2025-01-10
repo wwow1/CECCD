@@ -22,9 +22,9 @@ EdgeServer::EdgeServer() {
     // 其他初始化代码
     block_size_ = config.getBlockSizeMB() * 1024 * 1024;
     center_addr_ = config.getCenterAddress();
-    // center_latency_ = measureLatency(center_addr_);
-    // 测试专用
-    center_latency_ = 100;
+    center_latency_ = measureLatency(center_addr_);
+    // // 测试专用
+    // center_latency_ = 100;
     spdlog::info("Center node latency: {}ms", center_latency_);
 
     cache_index_ = std::make_unique<EdgeCacheIndex>();
