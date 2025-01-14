@@ -238,6 +238,28 @@ if(BUILD_TESTS)
 
     # 添加到测试套件中
     add_test(NAME MixIndexTest COMMAND mix_index_test)
+
+    # EdgeCacheTopology 测试可执行文件
+    add_executable(edge_cache_topology_test
+        test/googletest/test_edge_cache_topology.cpp
+    )
+
+    target_link_libraries(edge_cache_topology_test
+        PRIVATE
+        gtest
+        gtest_main
+        client
+        TBB::tbb
+    )
+
+    target_include_directories(edge_cache_topology_test
+        PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/googletest/googletest/include
+    )
+
+    # 添加到测试套件中
+    add_test(NAME EdgeCacheTopologyTest COMMAND edge_cache_topology_test)
 endif()
 
 # Installation rules

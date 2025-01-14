@@ -36,6 +36,8 @@ struct MyBloomFilter : public Common::BaseIndex {
         size_t total_bytes = static_cast<size_t>(num_items * bits_per_elem);
         
         std::cout << "Initializing BloomFilter with:"
+                  << "\n  edge_capacity_gb=" << config.getEdgeCapacityGB()
+                  << "\n  block_size_mb=" << config.getBlockSizeMB()
                   << "\n  expected items=" << num_items
                   << "\n  false positive rate=" << fpr
                   << "\n  bits per element=" << bits_per_elem

@@ -1,0 +1,109 @@
+networks:
+  cluster_network:
+    attachable: true
+    driver: overlay
+    ipam:
+      config:
+      - subnet: 172.20.0.0/16
+services:
+  center:
+    cap_add:
+    - NET_ADMIN
+    deploy:
+      placement:
+        constraints:
+        - node.hostname==ca66
+      resources: &id001
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '1'
+          memory: 512M
+    environment:
+    - POSTGRES_PASSWORD=password
+    - POSTGRES_USER=postgres
+    - POSTGRES_DB=postgres
+    - NODE_ID=0
+    - NUM_EDGES=4
+    image: edge_cluster:1
+    networks:
+      cluster_network:
+        ipv4_address: 172.20.0.2
+  edge1:
+    cap_add:
+    - NET_ADMIN
+    deploy:
+      placement:
+        constraints:
+        - node.hostname==ca66
+      resources: *id001
+    environment:
+    - POSTGRES_PASSWORD=password
+    - POSTGRES_USER=postgres
+    - POSTGRES_DB=postgres
+    - NODE_ID=1
+    - CENTER_DELAY=50
+    - EDGE_DELAYS=0,10,15,20
+    image: edge_cluster:1
+    networks:
+      cluster_network:
+        ipv4_address: 172.20.1.2
+  edge2:
+    cap_add:
+    - NET_ADMIN
+    deploy:
+      placement:
+        constraints:
+        - node.hostname==ca96
+      resources: *id001
+    environment:
+    - POSTGRES_PASSWORD=password
+    - POSTGRES_USER=postgres
+    - POSTGRES_DB=postgres
+    - NODE_ID=2
+    - CENTER_DELAY=50
+    - EDGE_DELAYS=10,0,15,20
+    image: edge_cluster:1
+    networks:
+      cluster_network:
+        ipv4_address: 172.20.1.3
+  edge3:
+    cap_add:
+    - NET_ADMIN
+    deploy:
+      placement:
+        constraints:
+        - node.hostname==ca66
+      resources: *id001
+    environment:
+    - POSTGRES_PASSWORD=password
+    - POSTGRES_USER=postgres
+    - POSTGRES_DB=postgres
+    - NODE_ID=3
+    - CENTER_DELAY=50
+    - EDGE_DELAYS=15,15,0,30
+    image: edge_cluster:1
+    networks:
+      cluster_network:
+        ipv4_address: 172.20.1.4
+  edge4:
+    cap_add:
+    - NET_ADMIN
+    deploy:
+      placement:
+        constraints:
+        - node.hostname==ca96
+      resources: *id001
+    environment:
+    - POSTGRES_PASSWORD=password
+    - POSTGRES_USER=postgres
+    - POSTGRES_DB=postgres
+    - NODE_ID=4
+    - CENTER_DELAY=50
+    - EDGE_DELAYS=20,20,30,0
+    image: edge_cluster:1
+    networks:
+      cluster_network:
+        ipv4_address: 172.20.1.5
+version: '3.8'
