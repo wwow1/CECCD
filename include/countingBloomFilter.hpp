@@ -131,7 +131,7 @@ namespace elastic_rose
             return max_counter_value_;
         }
 
-        u64 getMemoryUsage()
+        u64 getMemoryUsage() const
         {
             return filter_data_.size();
         }

@@ -51,6 +51,9 @@ class BaseIndex {
     virtual void add(uint32_t datastreamID, uint32_t blockId) = 0; // 纯虚函数
     virtual void remove(uint32_t datastreamID, uint32_t blockId ) = 0; // 纯虚函数
     virtual std::vector<uint32_t> range_query(uint32_t datastreamID, uint32_t start_blockId, uint32_t end_blockId) const = 0; // 纯虚函数
+    
+    // 新增：返回索引占用的内存空间（以字节为单位）
+    virtual size_t memory_usage() const = 0;
 };
 
 } // namespace Common

@@ -4,6 +4,7 @@
 #include <cstdint>
 
 std::unique_ptr<Common::BaseIndex> EdgeCacheIndex::createIndex(const std::string& nodeId) {
+    spdlog::info("createIndex: nodeId={}, latency={}ms, threshold={}ms", nodeId, node_latencies_[nodeId], config_latency_threshold_ms_);
     if (node_latencies_[nodeId] >= config_latency_threshold_ms_) {
         spdlog::info("Using MixIndex for node {} (latency: {}ms)", nodeId, node_latencies_[nodeId]);
         return std::make_unique<MixIndex>();
@@ -18,11 +19,17 @@ void EdgeCacheIndex::setNodeLatency(const std::string& nodeId, int64_t latency) 
 }
 
 int64_t EdgeCacheIndex::getNodeLatency(const std::string& nodeId) const {
+    if (node_latencies_.find(nodeId) == node_latencies_.end()) {
+        spdlog::error("Attempting to get latency for non-existent node: {}", nodeId);
+        // 返回一个默认值或抛出更明确的异常
+        return -1;
+    }
     return node_latencies_.at(nodeId);
 }
 
 void EdgeCacheIndex::setLatencyThreshold(int64_t threshold) {
     config_latency_threshold_ms_ = threshold;
+    spdlog::info("setLatencyThreshold: {}", threshold);
 }
 
 // 目前只支持单个数据源的查询，TODO（支持多个数据源的查询）

@@ -13,6 +13,7 @@
 #include <tbb/concurrent_hash_map.h>
 #include <shared_mutex>
 #include "config_manager.h"
+#include <spdlog/spdlog.h>
 
 struct MyBloomFilter : public Common::BaseIndex {
     mutable std::shared_mutex mutex_;
@@ -35,13 +36,10 @@ struct MyBloomFilter : public Common::BaseIndex {
         // 计算总比特数
         size_t total_bytes = static_cast<size_t>(num_items * bits_per_elem);
         
-        std::cout << "Initializing BloomFilter with:"
-                  << "\n  edge_capacity_gb=" << config.getEdgeCapacityGB()
-                  << "\n  block_size_mb=" << config.getBlockSizeMB()
-                  << "\n  expected items=" << num_items
-                  << "\n  false positive rate=" << fpr
-                  << "\n  bits per element=" << bits_per_elem
-                  << "\n  total memory=" << total_bytes << " bytes" << std::endl;
+        spdlog::info("Initializing BloomFilter: edge_capacity_gb={}, block_size_mb={}, expected_items={}, "
+                     "false_positive_rate={}, bits_per_element={}, total_memory={} bytes",
+                     config.getEdgeCapacityGB(), config.getBlockSizeMB(), num_items,
+                     fpr, bits_per_elem, total_bytes);
         
         bloom_filter_ = elastic_rose::CountingBloomFilter(total_bytes, fpr, 0);
     }
@@ -68,12 +66,19 @@ struct MyBloomFilter : public Common::BaseIndex {
         }
         return result;
     }
+
+    size_t memory_usage() const override {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        // 布隆过滤器的内存使用 = 计数位数组的大小
+        return bloom_filter_.getMemoryUsage();
+    }
 };
 
 struct MixIndex : public Common::BaseIndex {
     mutable std::shared_mutex mutex_;
     std::unordered_map<uint32_t, roaring::Roaring> index_;
-    
+    MixIndex() {}
+
     void add(uint32_t datastreamID, uint32_t blockId) {
         std::unique_lock<std::shared_mutex> lock(mutex_);
         index_[datastreamID].add(blockId);
@@ -102,6 +107,31 @@ struct MixIndex : public Common::BaseIndex {
             }
         }
         return result;
+    }
+
+    size_t memory_usage() const override {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        size_t total_bytes = 0;
+        
+        // 基础哈希表开销
+        total_bytes += sizeof(std::unordered_map<uint32_t, roaring::Roaring>);
+        
+        // 遍历所有位图计算总内存使用
+        for (const auto& pair : index_) {
+            // 键的开销
+            total_bytes += sizeof(uint32_t);
+            
+            // 获取实际运行时内存统计
+            roaring::api::roaring_statistics_t stats;
+            roaring::api::roaring_bitmap_statistics(&pair.second.roaring, &stats);
+            
+            // 累加所有容器的实际内存使用
+            total_bytes += stats.n_bytes_array_containers;
+            total_bytes += stats.n_bytes_run_containers;
+            total_bytes += stats.n_bytes_bitset_containers;
+        }
+        
+        return total_bytes;
     }
 };
 
@@ -139,6 +169,23 @@ public:
     void removeBlock(uint32_t block_id,
                     const std::string& node_id,
                     uint32_t stream_unique_id);
+
+    // 获取所有索引的总内存使用
+    size_t totalMemoryUsage() const {
+        size_t total_bytes = 0;
+        for (const auto& pair : timeseries_main_index_) {
+            total_bytes += pair.second->memory_usage();
+        }
+        return total_bytes;
+    }
+
+    size_t getSingleIndexMemoryUsage(const std::string& nodeId) const {
+        if (timeseries_main_index_.find(nodeId) == timeseries_main_index_.end()) {
+            spdlog::error("Attempting to get memory usage for non-existent node: {}", nodeId);
+            return 0;
+        }
+        return timeseries_main_index_.at(nodeId)->memory_usage();
+    }
 };
 
 #endif // EDGE_CACHE_INDEX_HPP

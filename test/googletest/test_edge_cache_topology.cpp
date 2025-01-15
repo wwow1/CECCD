@@ -7,10 +7,17 @@
 #include <queue>
 #include <tbb/concurrent_hash_map.h>
 #include <random>
+#include <spdlog/spdlog.h>
+#include <spdlog/sinks/basic_file_sink.h>
 
 class EdgeCacheTopologyTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        // 设置 spdlog
+        auto file_logger = spdlog::basic_logger_mt("topology_test", "topology_test.log", true);  // true 表示截断已存在的文件
+        spdlog::set_default_logger(file_logger);
+        spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] %v");  // 设置日志格式
+
         // 配置参数
         auto& config = ConfigManager::getInstance();
         config.loadConfig("config/cluster_config.json");
@@ -31,6 +38,11 @@ protected:
         
         // 设置节点间延迟
         setupNodeLatencies(topu_radius, hops_lat);
+    }
+    
+    void TearDown() override {
+        // 确保所有日志都被刷新到文件
+        spdlog::shutdown();
     }
     
     void setupNodeLatencies(int topu_radius, int hops_lat) {
@@ -62,10 +74,13 @@ protected:
     std::unordered_map<std::string, std::unique_ptr<EdgeCacheIndex>> edge_indices;
     std::vector<std::string> edge_nodes;
     std::string center_node;
-    int topu_radius = 4;
+    int topu_radius = 5;
     int hops_lat = 5;
-    int max_cache_block_num = 2048;
-    int max_stream_num = 4000;
+    uint32_t max_cache_block_num = 2048;
+    uint32_t max_store_block_num = 200;
+    uint32_t max_stream_num = 2500;
+    uint32_t centarl_edge_node_access_frequency = 5000;     // 中心节点的基准访问频次
+    double edge_node_decay_factor = 0.2;             // 边缘节点的访问频次衰减因子（相对于中心节点）
 
     // 添加缓存替换队列作为成员类
     class TestCacheReplacementQueue {
@@ -134,12 +149,10 @@ protected:
             auto [qccv, block_key, node] = priority_queue_.top();
             priority_queue_.pop();
 
-            return std::make_pair(block_key, node);
             // 使用 accessor 来访问 block_candidates_
             tbb::concurrent_hash_map<std::string, std::vector<std::pair<std::string, double>>>::accessor accessor;
             if (block_candidates_.find(accessor, block_key)) {
                 auto& candidates = accessor->second;
-                auto before_size = candidates.size();
                 candidates.erase(
                     std::remove_if(candidates.begin(), candidates.end(),
                         [&node](const auto& candidate) { return candidate.first == node; }
@@ -147,6 +160,8 @@ protected:
                     candidates.end()
                 );
             }
+            
+            return std::make_pair(block_key, node);
         }
         
         void clear() {
@@ -174,13 +189,17 @@ protected:
                 // 计算QCCV值
                 double qccv = 0.0;
                 for (const auto& access_node : edge_nodes) {
+                    if (access_records.find(access_node) == access_records.end()) {
+                        spdlog::error("access_records.find(access_node) == access_records.end()");
+                        continue;
+                    }
                     if (access_records.at(access_node).count(block_key)) {
                         uint32_t access_count = access_records.at(access_node).at(block_key);
                         auto pos = block_key.find(':');
                         uint32_t stream_id = std::stoul(block_key.substr(0, pos));
 
-                        double center_lat = base_freq * edge_indices[access_node]->getNodeLatency(center_node);
-                        double cache_lat = base_freq * edge_indices[access_node]->getNodeLatency(cache_lat);
+                        double center_lat = access_count * edge_indices[access_node]->getNodeLatency(center_node);
+                        double cache_lat = access_count * edge_indices[access_node]->getNodeLatency(center_node);
                         qccv += access_count * (static_cast<double>(center_lat - cache_lat));
                     }
                 }
@@ -199,8 +218,9 @@ protected:
 
         std::set<std::string> full_nodes;
         uint32_t full_nodes_num = 0;
-        while (auto placement = replacement_queue.getTopPlacementChoice() && full_nodes_num < edge_nodes.size()) {
-            auto [block_key, node] = placement.value();
+        std::optional<std::pair<std::string, std::string>> placement;
+        while ((placement = replacement_queue.getTopPlacementChoice()) && full_nodes_num < edge_nodes.size()) {
+            const auto& [block_key, node] = placement.value();  // 使用 value() 来获取 optional 的值
             if (allocation_plan[node].size() < total_capacity) {
                 allocation_plan[node].insert(block_key);
             } else {
@@ -218,12 +238,21 @@ protected:
     void executeAllocationPlan(
         const std::unordered_map<std::string, std::unordered_set<std::string>>& allocation_plan) {
         for (const auto& [node, blocks] : allocation_plan) {
+            spdlog::info("executeAllocationPlan: node: {}, blocks: {}", node, blocks.size());
             for (const auto& block_key : blocks) {
                 auto pos = block_key.find(':');
                 uint32_t stream_id = std::stoul(block_key.substr(0, pos));
                 uint32_t block_id = std::stoul(block_key.substr(pos + 1));
+                // spdlog::info("executeAllocationPlan: stream_id: {}, block_id: {}", stream_id, block_id);
                 for (const auto& other_node : edge_nodes) {
                     edge_indices[other_node]->addBlock(block_id, node, stream_id);
+                }
+            }
+        }
+        for (const auto& node : edge_nodes) {
+            for (const auto& other_node : edge_nodes) {
+                if (node != other_node) {
+                    spdlog::info("executeAllocationPlan: node: {}, other_node: {}, memory_usage: {}", node, other_node, edge_indices[node]->getSingleIndexMemoryUsage(other_node));
                 }
             }
         }
@@ -271,8 +300,8 @@ protected:
         }
     };
 
-    ZipfDistribution block_zipf{max_cache_block_num, 0.8};  // 块访问的 Zipf 分布
-    ZipfDistribution stream_zipf{max_stream_num, 0.6};      // 流访问的 Zipf 分布
+    ZipfDistribution block_zipf{max_store_block_num, 1.0};  // 块访问的 Zipf 分布
+    ZipfDistribution stream_zipf{max_stream_num, 2.0};      // 流访问的 Zipf 分布
 
     // 在类成员变量中添加随机数生成器
     std::mt19937 rng{std::random_device{}()};
@@ -287,6 +316,7 @@ TEST_F(EdgeCacheTopologyTest, BasicTopologySetup) {
     EXPECT_EQ(edge_nodes.size(), topu_radius * topu_radius);
     
     // 验证每个节点的延迟设置
+    std::cout << "edge nodes: " << edge_nodes.size() << std::endl;
     for (const auto& source : edge_nodes) {
         auto& source_index = edge_indices[source];
         
@@ -314,7 +344,7 @@ TEST_F(EdgeCacheTopologyTest, BasicTopologySetup) {
     }
 }
 
-TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {    
+TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {  
     // 为每个节点分配其偏好的数据流范围
     std::unordered_map<std::string, std::pair<uint32_t, uint32_t>> node_stream_ranges;
     uint32_t range_size = max_stream_num / (topu_radius * topu_radius);  // 每个节点偏好的流范围大小
@@ -324,28 +354,29 @@ TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {
     int center_i = topu_radius / 2;
     int center_j = topu_radius / 2;
     int max_manhattan_dist = topu_radius - 1;  // 最大曼哈顿距离就是从中心到边缘的距离
-    
+    spdlog::info("central_edge_node i: {}, j: {}", center_i, center_j);
     // 为每个节点计算基础访问频率
     for (const auto& node : edge_nodes) {
         int i = std::stoi(node.substr(5, 1));
         int j = std::stoi(node.substr(7, 1));
-        
+    
         // 计算到中心的曼哈顿距离
         int manhattan_dist = std::abs(i - center_i) + std::abs(j - center_j);
         double dist_ratio = static_cast<double>(manhattan_dist) / max_manhattan_dist;
         
-        // 基础访问频率：中心1000，最边缘600
-        uint32_t base_freq = static_cast<uint32_t>(1000 - 400 * dist_ratio);
+        // 基础访问频率
+        uint32_t base_freq = static_cast<uint32_t>(centarl_edge_node_access_frequency - centarl_edge_node_access_frequency * edge_node_decay_factor * dist_ratio);
         node_base_frequencies[node] = base_freq;
         
         // 分配数据流范围
         uint32_t start_stream = (i * topu_radius + j) * range_size;
         uint32_t end_stream = start_stream + range_size;
         node_stream_ranges[node] = {start_stream, end_stream};
+        spdlog::info("node: {}, start_stream: {}, end_stream: {}, freq: {}", node, start_stream, end_stream, base_freq);
     }
     
     // 生成访问记录
-    std::unordered_map<std::string, std::unordered_map<std::string, std::unordered_map<uint32_t, uint32_t>>> 
+    std::unordered_map<std::string, std::unordered_map<std::string, uint32_t>> 
         access_records; // node -> block_key -> access_count
     std::set<std::string> access_blocks;
 
@@ -377,12 +408,8 @@ TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {
                 
                 // 使用曼哈顿距离作为基础排名
                 int manhattan_dist = std::abs(i - preferred_i) + std::abs(j - preferred_j);
-                
-                // 添加高斯噪声到距离计算中
-                std::normal_distribution<double> dist_noise(manhattan_dist, 0.5);
-                double noisy_dist = std::max(1.0, dist_noise(rng));
-                
-                geo_rank = static_cast<uint32_t>(noisy_dist) + 1;
+                // 从第3名开始，也就是说其他stream的访问频率要在10%以内
+                geo_rank = manhattan_dist + 2;
             }
             
             // 为流的整体热度添加扰动
@@ -394,7 +421,7 @@ TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {
         // 第二遍：相对于最大值进行放大，避免小数精度问题
         double total_scaled_affinity = 0.0;
         for (auto& affinity : stream_affinities) {
-            affinity = (affinity / max_affinity) * SCALING_FACTOR;
+            affinity = affinity * SCALING_FACTOR;
             total_scaled_affinity += affinity;
         }
         
@@ -413,9 +440,9 @@ TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {
             
             // 为选中的数据流生成块访问记录
             // 使用 Zipf 分布直接采样块（新块具有更高的访问概率）
-            uint32_t selected_block = max_cache_block_num - 1 - block_zipf.sample(rng);
+            uint32_t selected_block = max_store_block_num - block_zipf.sample();
             std::string block_key = std::to_string(selected_stream) + ":" + std::to_string(selected_block);
-            access_records[node][block_key]++;
+            access_records[node][block_key] += 1;
             if (access_blocks.find(block_key) == access_blocks.end()) {
                 access_blocks.insert(block_key);
             }
@@ -429,24 +456,29 @@ TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {
     // 第二轮：验证索引
     uint64_t total_queries = 0;
     uint64_t false_positives = 0;
+    uint64_t not_found = 0;
+    uint64_t find_count = 0;
     
     for (const auto& [node, base_freq] : node_base_frequencies) {
         // 直接使用保存的分布
-        const auto& stream_distribution = node_stream_distributions[node];
+        auto& stream_distribution = node_stream_distributions[node];
         
+        spdlog::info("query phase: node: {}, base_freq: {}", node, base_freq);
         // 模拟查询
         for (uint32_t query = 0; query < base_freq; query++) {
             uint32_t selected_stream = stream_distribution(rng);
-            uint32_t selected_block = block_zipf.sample(rng);
+            uint32_t selected_block = max_store_block_num - block_zipf.sample();
             total_queries++;
-            
+            // spdlog::info("query phase: node: {}, selected_stream: {}, selected_block: {}", node, selected_stream, selected_block);
             // 查询本地索引中的指定块
+            // std::cout << "queryMainIndex start" << selected_block << " end " << selected_block << std::endl;
             auto results = edge_indices[node]->queryMainIndex(
                 std::to_string(selected_stream),
                 selected_block,
                 selected_block,
                 selected_stream
             );
+            // std::cout << "queryMainIndex end" << std::endl;
             // 检查是否在当前节点的索引中找到了该块
             bool found_in_index = false;
             std::string found_node;
@@ -459,35 +491,29 @@ TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {
             
             if (found_in_index) {
                 // 检查实际分配计划
-                for (const auto& alloc : allocation_plan[found_node]) {
-                    if (alloc.find(selected_block) != alloc.end()) {
-                        // 找到正确节点
-                        break;
-                    }
-                    // 计算曼哈顿距离
-                    int wrong_i = std::stoi(found_node.substr(5, 1));
-                    int wrong_j = std::stoi(found_node.substr(7, 1));
-                    int i = std::stoi(node.substr(5, 1));
-                    int j = std::stoi(node.substr(7, 1));
-                    int manhattan_dist = std::abs(i - wrong_i) + std::abs(j - wrong_j);
-                    false_positives++;
-
-                    std::cout << "False positive detected:\n"
-                                << "  Querying node: " << node 
-                                << "\n  Wrong node: " << found_node
-                                << "\n  Manhattan distance: " << manhattan_dist
-                                << "\n  Stream ID: " << selected_stream
-                                << "\n  Block ID: " << selected_block 
-                                << std::endl;
+                std::string block_key = std::to_string(selected_stream) + ":" + std::to_string(selected_block);
+                const auto& node_blocks = allocation_plan[found_node];  // 获取节点的块集合
+                if (node_blocks.find(block_key) != node_blocks.end()) {
+                    // 找到正确节点
+                    find_count++;
+                    continue;
                 }
+                // 计算曼哈顿距离
+                int wrong_i = std::stoi(found_node.substr(5, 1));
+                int wrong_j = std::stoi(found_node.substr(7, 1));
+                int i = std::stoi(node.substr(5, 1));
+                int j = std::stoi(node.substr(7, 1));
+                int manhattan_dist = std::abs(i - wrong_i) + std::abs(j - wrong_j);
+                false_positives++;
+                spdlog::info("False positive: query_node={}, wrong_node={}, manhattan_dist={}, stream_id={}, block_id={}", 
+                             node, found_node, manhattan_dist, selected_stream, selected_block);
             }
+            not_found++;
         }
     }
     
     // 输出总体统计信息
-    std::cout << "Total queries: " << total_queries << std::endl;
-    std::cout << "False positives: " << false_positives << std::endl;
-    std::cout << "False positive rate: " 
-              << (double)false_positives / total_queries * 100 
-              << "%" << std::endl;
+    spdlog::info("Statistics: total_queries={}, false_positives={}, not_found={}, find_count={}, false_positive_rate={:.2f}%, find_rate={:.2f}%", 
+                 total_queries, false_positives, not_found, find_count, 
+                 (double)false_positives / total_queries * 100, (double)find_count / total_queries * 100);
 }
