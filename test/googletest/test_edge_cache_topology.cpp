@@ -145,7 +145,7 @@ protected:
     int hops_lat = 2;
     int index_constran_hop = 0;
     int center_lat = 10;
-    int query_blocks = 3;
+    int query_blocks = 1;
     uint32_t max_cache_block_num = 2048;
     uint32_t max_store_block_num = 1500;
     uint32_t max_stream_num = 250;
@@ -299,7 +299,6 @@ protected:
                         uint32_t access_count = access_records.at(access_node).at(block_key);
                         auto pos = block_key.find(':');
                         uint32_t stream_id = std::stoul(block_key.substr(0, pos));
-
                         double center_lat = access_count * edge_indices[access_node]->getNodeLatency(center_node);
                         double cache_lat = access_count * edge_indices[access_node]->getNodeLatency(cache_node);
                         qccv += access_count * (static_cast<double>(center_lat - cache_lat));
@@ -490,6 +489,84 @@ TEST_F(EdgeCacheTopologyTest, ZipfDistributionAnalysis) {
     }
 }
 
+TEST_F(EdgeCacheTopologyTest, CompareIndexMemoryUsage) {
+    auto& config = ConfigManager::getInstance();
+    uint32_t block_count = (config.getEdgeCapacityGB() * 1024) / config.getBlockSizeMB();
+    
+    spdlog::info("\nTesting with {} blocks:", block_count);
+    
+    // 1. 创建假阳性率为0.1%的布隆过滤器
+    config.setBloomFilterFPR(0.001); // 设置0.1%的假阳性率
+    MyBloomFilter bloom_01;
+
+    config.setBloomFilterFPR(0.01); // 设置0.1%的假阳性率
+    MyBloomFilter bloom_1;
+
+    // 2. 创建假阳性率为0.5%的布隆过滤器
+    config.setBloomFilterFPR(0.005); // 设置0.5%的假阳性率
+    MyBloomFilter bloom_05;
+    
+    // 3. 创建混合索引
+    MixIndex mix_index;
+    
+    // 4. 创建哈希表索引
+    std::unordered_map<uint32_t, std::unordered_set<uint32_t>> hashmap_index;
+    
+    // 添加相同数量的数据块到所有索引中
+    for (uint32_t stream_id = 0; stream_id < max_stream_num; stream_id++) {
+        // 使用 Zipf 分布来选择块
+        for (uint32_t i = 0; i < block_count / max_stream_num; i++) {
+            uint32_t block_id = max_store_block_num - block_zipf.sample();
+            
+            // 添加到布隆过滤器
+            bloom_01.add(stream_id, block_id);
+            bloom_05.add(stream_id, block_id);
+            bloom_1.add(stream_id, block_id);
+            
+            // 添加到混合索引
+            mix_index.add(stream_id, block_id);
+            
+            // 添加到哈希表
+            hashmap_index[stream_id].insert(block_id);
+        }
+    }
+    
+    // 计算内存占用
+    size_t bloom_memory_1 = bloom_1.memory_usage();
+    size_t bloom_memory_01 = bloom_01.memory_usage();
+    size_t bloom_memory_05 = bloom_05.memory_usage();
+    size_t mix_memory = mix_index.memory_usage();
+    
+    // 计算哈希表内存占用（更准确的版本）
+    size_t hashmap_memory = 0;
+    
+    // 1. 外层map的基本开销
+    hashmap_memory += sizeof(std::unordered_map<uint32_t, std::unordered_set<uint32_t>>);
+    // 外层map的bucket array (只计算实际使用的bucket)
+    hashmap_memory += std::ceil(hashmap_index.size() / hashmap_index.max_load_factor()) * sizeof(void*);
+    
+    // 2. 遍历每个stream的内部set
+    for (const auto& [stream_id, block_set] : hashmap_index) {
+        // stream_id的存储开销
+        hashmap_memory += sizeof(uint32_t);
+        
+        // 内层set的基本开销
+        hashmap_memory += sizeof(std::unordered_set<uint32_t>);
+        // 内层set的bucket array (只计算实际使用的bucket)
+        hashmap_memory += std::ceil(block_set.size() / block_set.max_load_factor()) * sizeof(void*);
+        
+        // set中实际存储的block_id
+        hashmap_memory += block_set.size() * sizeof(uint32_t);
+    }
+    
+    // 输出结果
+    spdlog::info("Memory Usage Comparison for {} blocks:", block_count);
+    spdlog::info("  Bloom Filter (1% FPR): {} bytes", bloom_memory_1);
+    spdlog::info("  Bloom Filter (0.1% FPR): {} bytes", bloom_memory_01);
+    spdlog::info("  Bloom Filter (0.5% FPR): {} bytes", bloom_memory_05);
+    spdlog::info("  Mix Index: {} bytes", mix_memory);
+    spdlog::info("  Hash Map: {} bytes", hashmap_memory);
+}
 
 TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {  
     // 为每个节点分配其偏好的数据流范围

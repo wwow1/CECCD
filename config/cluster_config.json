@@ -5,7 +5,7 @@
         },
         "block_size_mb": 1,
         "edge_capacity_gb": 2.0,
-        "bloom_filter_fpr": 0.01,
+        "bloom_filter_fpr": 0.005,
         "index_latency_threshold_ms": 30,
         "statistics_report_interval_s": 10,
         "prediction_period_s": 60,

@@ -32,6 +32,9 @@ public:
         return instance;
     }
 
+    void setBloomFilterFPR(const double fpr) {
+        bloom_filter_fpr_ = fpr;
+    }
     void loadConfig(const std::string& config_path);
     const std::string& getCenterAddress() const { return center_address_; }
     const DatabaseConfig& getDatabaseConfig() const { return db_config_; }

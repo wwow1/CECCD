@@ -14,6 +14,7 @@
 #include <string>
 #include <assert.h>
 #include <iostream>
+#include <spdlog/spdlog.h>
 
 #include "murmurHash3.h"
 
@@ -108,6 +109,25 @@ namespace elastic_rose
             filter_data_.resize(total_size, 0);
             expect_num_ = calculate_n(total_size * 8 / counter_size_, false_positive);
             bits_per_key_ = (total_size * 8 / counter_size_ / expect_num_);
+            std::cout << "expect_num =" << expect_num_ << " bits_per_key_ = " << bits_per_key_ << std::endl;
+            k_ = static_cast<size_t>(bits_per_key_ * 0.69); // 0.69 =~ ln(2)
+            if (k_ < 1)
+                k_ = 1;
+            if (k_ > 30)
+                k_ = 30;
+        }
+
+        CountingBloomFilter(size_t expected_items, double false_positive)
+            : id_(0), insert_num_(0)
+        {
+            // 计算所需的总比特数
+            double bits_per_elem = (-log(false_positive) / (log(2) * log(2))) * counter_size_;
+            size_t total_size = static_cast<size_t>(ceil(expected_items * bits_per_elem / 8)); // 转换为字节
+
+            filter_data_.resize(total_size, 0);
+            expect_num_ = expected_items; // 直接使用传入的预期元素数量
+            bits_per_key_ = (total_size * 8 / counter_size_ / expect_num_);
+            spdlog::info("CountingBloomFilter: expect_num:{}, bits_per_key_:{}, total_size:{}bytes", expect_num_, bits_per_key_, total_size);
             // We intentionally round down to reduce probing cost a little bit
             k_ = static_cast<size_t>(bits_per_key_ * 0.69); // 0.69 =~ ln(2)
             if (k_ < 1)

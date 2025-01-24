@@ -22,23 +22,14 @@ struct MyBloomFilter : public Common::BaseIndex {
     MyBloomFilter() {
         auto& config = ConfigManager::getInstance();
         
-        // 计算edge节点可以存储的最大块数
         size_t max_blocks = (config.getEdgeCapacityGB() * 1024) / config.getBlockSizeMB();
         double fpr = config.getBloomFilterFPR();
         
-        // 计算每个元素需要的比特数（bits per element）
-        // 使用公式：bits_per_elem = -log(p) / (ln(2)^2)
-        double bits_per_elem = -log(fpr) / (log(2) * log(2));
-        
-        // 计算总比特数
-        size_t total_bytes = static_cast<size_t>(max_blocks * bits_per_elem);
-        
         spdlog::info("Initializing BloomFilter: edge_capacity_gb={}, block_size_mb={}, expected_items={}, "
-                     "false_positive_rate={}, bits_per_element={}, total_memory={} bytes",
-                     config.getEdgeCapacityGB(), config.getBlockSizeMB(), num_items,
-                     fpr, bits_per_elem, total_bytes);
+                     "false_positive_rate={}",
+                     config.getEdgeCapacityGB(), config.getBlockSizeMB(), max_blocks, fpr);
         
-        bloom_filter_ = elastic_rose::CountingBloomFilter(total_bytes, fpr, 0);
+        bloom_filter_ = elastic_rose::CountingBloomFilter(max_blocks, fpr);
     }
 
     void add(uint32_t datastreamID, uint32_t blockId) {
