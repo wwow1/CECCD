@@ -47,6 +47,24 @@ protected:
         spdlog::shutdown();
     }
     
+    // 修改延迟参数范围
+    double min_hop_latency = 2.0;   // 最小跳延迟 2ms
+    double max_hop_latency = 4.0;   // 最大跳延迟 4ms
+    double min_center_latency = 10.0; // 最小中心延迟 10ms
+    double max_center_latency = 20.0; // 最大中心延迟 20ms
+    
+    // 生成跳延迟的方法
+    double generateHopLatency() {
+        std::uniform_real_distribution<double> dist(min_hop_latency, max_hop_latency);
+        return dist(rng);
+    }
+    
+    // 生成中心节点延迟的方法
+    double generateCenterLatency() {
+        std::uniform_real_distribution<double> dist(min_center_latency, max_center_latency);
+        return dist(rng);
+    }
+    
     void setupNodeLatencies(int topu_radius, int hops_lat) {
         // 设置边缘节点之间的延迟（topu_radius x topu_radius网格）
         for (int i = 0; i < topu_radius; i++) {
@@ -54,19 +72,25 @@ protected:
                 std::string current = "edge_" + std::to_string(i) + "_" + std::to_string(j);
                 auto& current_index = edge_indices[current];
                 
-                // 设置当前节点到中心节点的延迟
-                current_index->setNodeLatency(center_node, center_lat);
+                // 设置当前节点到中心节点的延迟（带抖动）
+                current_index->setNodeLatency(center_node, generateCenterLatency());
                 
                 // 设置到所有其他边缘节点的延迟
                 for (int ni = 0; ni < topu_radius; ni++) {
                     for (int nj = 0; nj < topu_radius; nj++) {
-                      std::string target = "edge_" + std::to_string(ni) + "_" + std::to_string(nj);
+                        std::string target = "edge_" + std::to_string(ni) + "_" + std::to_string(nj);
                         if (i == ni && j == nj) {
-                          current_index->setNodeLatency(target, 0);
-                        };  // 跳过自身
+                            current_index->setNodeLatency(target, 0);
+                            continue;  // 跳过自身
+                        }
                         // 计算曼哈顿距离作为跳数
                         int hops = std::abs(i - ni) + std::abs(j - nj);
-                        current_index->setNodeLatency(target, hops * hops_lat);
+                        // 为每一跳生成延迟并累加
+                        double total_latency = 0.0;
+                        for (int hop = 0; hop < hops; hop++) {
+                            total_latency += generateHopLatency();
+                        }
+                        current_index->setNodeLatency(target, total_latency);
                     }
                 }
             }
@@ -114,25 +138,34 @@ protected:
         }
     };
 
-    ZipfDistribution block_zipf{max_store_block_num, 1.2};  // 块访问的 Zipf 分布
-
     std::unordered_map<std::string, std::unique_ptr<EdgeCacheIndex>> edge_indices;
     std::vector<std::string> edge_nodes;
     std::string center_node;
     int topu_radius = 5;
-    int hops_lat = 5;
-    int index_constran_hop = 3;
-    int center_lat = 50;
-    int query_blocks = 1;
+    int hops_lat = 2;
+    int index_constran_hop = 0;
+    int center_lat = 10;
+    int query_blocks = 3;
     uint32_t max_cache_block_num = 2048;
-    uint32_t max_store_block_num = 150;
-    uint32_t max_stream_num = 2500;
+    uint32_t max_store_block_num = 1500;
+    uint32_t max_stream_num = 250;
     uint32_t centarl_edge_node_access_frequency = 100000;     // 中心节点的基准访问频次
     double edge_node_decay_factor = 0.4;             // 边缘节点的访问频次衰减因子（相对于中心节点）
     
+    ZipfDistribution block_zipf{max_store_block_num, 1.2};  // 块访问的 Zipf 分布
+    // 添加用户到边缘服务器的延迟范围配置
+    double min_user_latency = 2.0;  // 最小延迟 2ms
+    double max_user_latency = 4.0;  // 最大延迟 4ms
+    
+    // 添加生成用户延迟的方法
+    double generateUserLatency() {
+        std::uniform_real_distribution<double> dist(min_user_latency, max_user_latency);
+        return dist(rng);
+    }
+
     uint32_t sampleStream(const std::pair<uint32_t, uint32_t>& preferred_range, uint32_t max_stream_num) {
         // 90% 概率选择本地流，10% 概率选择远程流
-        std::bernoulli_distribution local_choice(0.90);
+        std::bernoulli_distribution local_choice(0.95);
         
         if (local_choice(rng)) {
             // 从本地流范围中随机选择
@@ -305,24 +338,69 @@ protected:
         return allocation_plan;
     }
 
+    // 添加对照组的数据结构
+    std::unordered_map<std::string, std::unordered_map<uint32_t, std::string>> reference_indices;
+    
+    // 添加获取哈希表内存使用的方法
+    size_t getHashMapMemoryUsage(const std::string& node) {
+        size_t total_size = 0;
+        
+        // 计算外层map的基本大小
+        total_size += sizeof(std::unordered_map<uint32_t, std::string>);
+        
+        // 计算内部元素的大小
+        if (reference_indices.find(node) != reference_indices.end()) {
+            const auto& inner_map = reference_indices[node];
+            // 每个bucket的大小
+            total_size += inner_map.bucket_count() * sizeof(void*);
+            
+            // 每个元素的大小
+            for (const auto& [block_id, target_node] : inner_map) {
+                total_size += sizeof(uint32_t);  // key
+                total_size += target_node.capacity() * sizeof(char);  // string value
+                total_size += sizeof(void*) * 2; // 哈希表节点指针
+            }
+        }
+        
+        return total_size;
+    }
+
     void executeAllocationPlan(
         const std::unordered_map<std::string, std::unordered_set<std::string>>& allocation_plan) {
+        // 清理之前的索引
+        reference_indices.clear();
+        
         for (const auto& [node, blocks] : allocation_plan) {
             spdlog::info("executeAllocationPlan: node: {}, blocks: {}", node, blocks.size());
             for (const auto& block_key : blocks) {
                 auto pos = block_key.find(':');
                 uint32_t stream_id = std::stoul(block_key.substr(0, pos));
                 uint32_t block_id = std::stoul(block_key.substr(pos + 1));
-                // spdlog::info("executeAllocationPlan: stream_id: {}, block_id: {}", stream_id, block_id);
+                
+                // 更新布隆过滤器索引
                 for (const auto& other_node : edge_nodes) {
                     edge_indices[other_node]->addBlock(block_id, node, stream_id);
                 }
+                
+                // 更新哈希表索引（对照组）
+                for (const auto& other_node : edge_nodes) {
+                    reference_indices[other_node][block_id] = node;
+                }
             }
         }
+
+        // 输出内存使用对比
         for (const auto& node : edge_nodes) {
             for (const auto& other_node : edge_nodes) {
                 if (node != other_node) {
-                    spdlog::info("executeAllocationPlan: node: {}, other_node: {}, memory_usage: {}", node, other_node, edge_indices[node]->getSingleIndexMemoryUsage(other_node));
+                    size_t bloom_memory = edge_indices[node]->getSingleIndexMemoryUsage(other_node);
+                    size_t hashmap_memory = getHashMapMemoryUsage(node);
+                    
+                    spdlog::info("Memory Usage Comparison - Node: {} -> {}", node, other_node);
+                    spdlog::info("  Bloom Filter: {} bytes", bloom_memory);
+                    spdlog::info("  Hash Map: {} bytes", hashmap_memory);
+                    spdlog::info("  Memory Saving: {:.2f}%", 
+                        100.0 * (hashmap_memory - bloom_memory) / hashmap_memory);
                 }
             }
         }
@@ -331,7 +409,7 @@ protected:
     std::mt19937 rng{std::random_device{}()};
 };
 
-// 测试基本的拓扑结构设置
+// 更新基本拓扑测试以适应新的延迟范围
 TEST_F(EdgeCacheTopologyTest, BasicTopologySetup) {
     // 验证节点数量
     EXPECT_EQ(edge_nodes.size(), topu_radius * topu_radius);
@@ -341,8 +419,10 @@ TEST_F(EdgeCacheTopologyTest, BasicTopologySetup) {
     for (const auto& source : edge_nodes) {
         auto& source_index = edge_indices[source];
         
-        // 验证到中心节点的延迟
-        EXPECT_EQ(source_index->getNodeLatency(center_node), center_lat);
+        // 验证到中心节点的延迟在合理范围内
+        double center_latency = source_index->getNodeLatency(center_node);
+        EXPECT_GE(center_latency, min_center_latency);
+        EXPECT_LE(center_latency, max_center_latency);
         
         // 验证到其他节点的延迟
         for (const auto& target : edge_nodes) {
@@ -354,19 +434,20 @@ TEST_F(EdgeCacheTopologyTest, BasicTopologySetup) {
                 
                 // 计算曼哈顿距离（最短路径跳数）
                 int manhattan_dist = std::abs(i1 - i2) + std::abs(j1 - j2);
-                int expected_latency = manhattan_dist * hops_lat;
+                double latency = source_index->getNodeLatency(target);
                 
-                EXPECT_EQ(source_index->getNodeLatency(target), expected_latency)
-                    << "Unexpected latency from " << source << " to " << target
-                    << " (expected " << expected_latency << "ms for "
-                    << manhattan_dist << " hops)";
+                // 验证延迟在合理范围内
+                EXPECT_GE(latency, manhattan_dist * min_hop_latency)
+                    << "Latency too low from " << source << " to " << target;
+                EXPECT_LE(latency, manhattan_dist * max_hop_latency)
+                    << "Latency too high from " << source << " to " << target;
             }
         }
     }
 }
 
 TEST_F(EdgeCacheTopologyTest, ZipfDistributionAnalysis) {
-    ZipfDistribution zipf(max_store_block_num, 0.4);
+    ZipfDistribution zipf(max_store_block_num, 1.0);
     
     // 计算前10个排名的概率
     std::cout << "Zipf distribution (alpha=0.4) probability analysis:" << std::endl;
@@ -379,7 +460,7 @@ TEST_F(EdgeCacheTopologyTest, ZipfDistributionAnalysis) {
     }
     
     // 计算累积概率分布
-    std::vector<int> ranges = {10, 20, 50, 100, max_store_block_num};
+    std::vector<int> ranges = {150, 200, 300, 100, max_store_block_num};
     double cumulative_prob = 0.0;
     std::cout << "\nCumulative probability distribution:" << std::endl;
     std::cout << "Range\tCumulative Probability" << std::endl;
@@ -481,7 +562,7 @@ TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {
     uint64_t optimal_false_positives = 0;
     uint64_t not_found = 0;
     uint64_t find_count = 0;
-    
+    uint64_t local_fount = 0;
     std::set<std::string> access_blocks_test_set;
 
     // 添加两组延时统计相关变量
@@ -500,12 +581,17 @@ TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {
             while (selected_block < query_blocks) {
                 selected_block = max_store_block_num - block_zipf.sample();
             }
-            double max_actual_latency = 0.0;
-            double max_optimal_latency = 0.0;
-            double jitter = jitter_dist(gen);  // 对整个查询使用相同的扰动
+            
+            // 为整个查询生成一个用户延迟（假设用户位置在查询期间不变）
+            double user_latency = generateUserLatency();
+            double max_actual_latency = user_latency;  // 初始化为用户延迟
+            double max_optimal_latency = user_latency; // 初始化为用户延迟
+            
+            double jitter = jitter_dist(gen);
             total_queries++;
             bool ac_false_pos = false;
             bool op_false_pos = false;
+            
             // 查询连续的query_blocks个块
             for (int i = 0; i < query_blocks; i++) {
                 uint32_t current_block = selected_block - i;
@@ -537,7 +623,11 @@ TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {
                     if (node_blocks.find(block_key) != node_blocks.end()) {
                         // 找到正确节点
                         find_count++;
-                        double latency = edge_indices[node]->getNodeLatency(found_node) / 2.0 + jitter;
+                        double latency = std::min(edge_indices[node]->getNodeLatency(found_node), edge_indices[node]->getNodeLatency(center_node)) + user_latency;
+                        if (found_node == node) {
+                            local_fount++;
+                            // spdlog::info("query found in loacl edge_server. lat:{}", latency);
+                        }                                                                                                                 
                         max_actual_latency = std::max(max_actual_latency, latency);
                         max_optimal_latency = std::max(max_optimal_latency, latency);
                         continue;
@@ -547,21 +637,30 @@ TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {
                         ac_false_pos = true;
                     }
                     
-                    // 计算当前block的延迟
-                    double actual_latency = edge_indices[node]->getNodeLatency(found_node) +
-                                          (edge_indices[node]->getNodeLatency(center_node) + 0.0) / 2 + 
-                                          jitter;
-                    max_actual_latency = std::max(max_actual_latency, actual_latency);
-                    
-                    // 如果超过跳数约束，计算理想情况的延迟
-                    if (edge_indices[node]->getNodeLatency(found_node) >= index_constran_hop * hops_lat) {
-                        double optimal_latency = edge_indices[node]->getNodeLatency(center_node) / 2 + jitter;
+                    // 如果边缘侧的数据比中心节点还远，那不如直接访问中心
+                    if (edge_indices[node]->getNodeLatency(found_node) > edge_indices[node]->getNodeLatency(center_node)) {
+                        double actual_latency = user_latency + edge_indices[node]->getNodeLatency(center_node);
+                        double optimal_latency = actual_latency;
+                        max_actual_latency = std::max(max_actual_latency, actual_latency);
                         max_optimal_latency = std::max(max_optimal_latency, optimal_latency);
                     } else {
-                        max_optimal_latency = std::max(max_optimal_latency, actual_latency);
-                        if (!op_false_pos) {
-                            optimal_false_positives++;
-                            op_false_pos = true;
+                        // 计算当前block的延迟（包含用户延迟）
+                        double actual_latency = user_latency + 
+                                            edge_indices[node]->getNodeLatency(found_node) +
+                                            (edge_indices[node]->getNodeLatency(center_node) + 0.0);
+                        max_actual_latency = std::max(max_actual_latency, actual_latency);
+                        
+                        // 如果超过跳数约束，计算理想情况的延迟
+                        if (edge_indices[node]->getNodeLatency(found_node) >= index_constran_hop * hops_lat) {
+                            double optimal_latency = user_latency + 
+                                                edge_indices[node]->getNodeLatency(center_node);
+                            max_optimal_latency = std::max(max_optimal_latency, optimal_latency);
+                        } else {
+                            max_optimal_latency = std::max(max_optimal_latency, actual_latency);
+                            if (!op_false_pos) {
+                                optimal_false_positives++;
+                                op_false_pos = true;
+                            }
                         }
                     }
                 }
@@ -569,10 +668,10 @@ TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {
             }
             
             // 只有当查询包含至少一个block时才记录延迟
-            if (max_actual_latency > 0) {
+            if (max_actual_latency > user_latency) {
                 actual_latencies.push_back(max_actual_latency);
             }
-            if (max_optimal_latency > 0) {
+            if (max_optimal_latency > user_latency) {
                 optimal_latencies.push_back(max_optimal_latency);
             }
         }
@@ -587,9 +686,9 @@ TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {
     spdlog::info("test_block_and_not_found_in_tran_set: {}", test_block_and_not_found_in_tran_set);
     
     // 输出总体统计信息
-    spdlog::info("Statistics: total_queries={}, not_found={}, find_count={}, actual_false_positives={}, optimal_false_positives={}, actual_false_positive_rate={:.2f}%, optimal_false_positive_rate={:.2f}%, find_rate={:.2f}%", 
+    spdlog::info("Statistics: total_queries={}, not_found={}, find_count={}, actual_false_positives={}, optimal_false_positives={}, actual_false_positive_rate={:.2f}%, optimal_false_positive_rate={:.2f}%, find_rate={:.2f}%, local_fount={}", 
                  total_queries, not_found, find_count, actual_false_positives, optimal_false_positives, 
-                 (double)actual_false_positives / total_queries * 100, (double)optimal_false_positives / total_queries * 100, (double)find_count / total_queries * 100);
+                 (double)actual_false_positives / total_queries * 100, (double)optimal_false_positives / total_queries * 100, (double)find_count / total_queries * 100, local_fount);
                  
     // 在测试结束时计算延时统计信息
     auto calculate_stats = [](const std::vector<double>& latencies, const std::string& type) {

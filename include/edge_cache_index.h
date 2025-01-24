@@ -26,15 +26,12 @@ struct MyBloomFilter : public Common::BaseIndex {
         size_t max_blocks = (config.getEdgeCapacityGB() * 1024) / config.getBlockSizeMB();
         double fpr = config.getBloomFilterFPR();
         
-        // 为了应对可能的临时超出和动态变化，我们将容量扩大1.2倍
-        size_t num_items = static_cast<size_t>(max_blocks * 1.2);
-        
         // 计算每个元素需要的比特数（bits per element）
         // 使用公式：bits_per_elem = -log(p) / (ln(2)^2)
         double bits_per_elem = -log(fpr) / (log(2) * log(2));
         
         // 计算总比特数
-        size_t total_bytes = static_cast<size_t>(num_items * bits_per_elem);
+        size_t total_bytes = static_cast<size_t>(max_blocks * bits_per_elem);
         
         spdlog::info("Initializing BloomFilter: edge_capacity_gb={}, block_size_mb={}, expected_items={}, "
                      "false_positive_rate={}, bits_per_element={}, total_memory={} bytes",
