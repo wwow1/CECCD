@@ -12,11 +12,11 @@
 #include <numeric>
 #include <algorithm>
 
-class EdgeCacheTopologyTest : public ::testing::Test {
+class EdgeCacheTRECSTest : public ::testing::Test {
 protected:
     void SetUp() override {
         // 设置 spdlog
-        auto file_logger = spdlog::basic_logger_mt("topology_test", "topology_test.log", true);  // true 表示截断已存在的文件
+        auto file_logger = spdlog::basic_logger_mt("trecs_test", "trecs__test.log", true);  // true 表示截断已存在的文件
         spdlog::set_default_logger(file_logger);
         spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] %v");  // 设置日志格式
 
@@ -32,32 +32,10 @@ protected:
                 
                 // 为每个节点创建一个EdgeCacheIndex实例
                 auto edge_index = std::make_unique<EdgeCacheIndex>();
-                edge_index->setLatencyThreshold(10000); // 设置很高的阈值，确保使用布隆过滤器
-                edge_indices[node_id] = std::move(edge_index);
-            }
-        }
-        center_node = "center_0";
-        
-        // 设置节点间延迟
-        setupNodeLatencies(topu_radius);
-    }
-    
-    void ResetEdgeIndex(int index_constran_lat) {
-        edge_nodes.clear();
-        edge_indices.clear();
-        // 初始化节点ID
-        for (int i = 0; i < topu_radius; i++) {
-            for (int j = 0; j < topu_radius; j++) {
-                std::string node_id = "edge_" + std::to_string(i) + "_" + std::to_string(j);
-                edge_nodes.push_back(node_id);
-                
-                // 为每个节点创建一个EdgeCacheIndex实例
-                auto edge_index = std::make_unique<EdgeCacheIndex>();
                 edge_index->setLatencyThreshold(index_constran_lat); // 设置很高的阈值，确保使用布隆过滤器
                 edge_indices[node_id] = std::move(edge_index);
             }
         }
-        spdlog::info("Reset EdgeIndex index_constran_lat:{}", index_constran_lat);
         center_node = "center_0";
         
         // 设置节点间延迟
@@ -177,9 +155,10 @@ protected:
     uint32_t max_stream_num = 1400;
     uint32_t centarl_edge_node_access_frequency = 100000;     // 中心节点的基准访问频次
     double edge_node_decay_factor = 0;             // 边缘节点的访问频次衰减因子（相对于中心节点）
-    
+    double networkBandwidth = 100; // 100Mbps
+
     bool split_stream = false;
-    ZipfDistribution prepare_block_zipf{max_store_block_num, 1.8};  // 块访问的 Zipf 分布
+    ZipfDistribution prepare_block_zipf{max_store_block_num, 1.6};  // 块访问的 Zipf 分布
     ZipfDistribution test_block_zipf{max_store_block_num, 1.0};
     
     // 添加生成用户延迟的方法
@@ -318,6 +297,7 @@ protected:
             std::vector<std::pair<std::string, double>> candidates;
             
             for (const auto& cache_node : edge_nodes) {
+              
                 // 计算QCCV值
                 double qccv = 0.0;
                 for (const auto& access_node : edge_nodes) {
@@ -522,208 +502,7 @@ protected:
 };
 
 // 更新基本拓扑测试以适应新的延迟范围
-TEST_F(EdgeCacheTopologyTest, BasicTopologySetup) {
-    // 验证节点数量
-    EXPECT_EQ(edge_nodes.size(), topu_radius * topu_radius);
-    
-    // 验证每个节点的延迟设置
-    std::cout << "edge nodes: " << edge_nodes.size() << std::endl;
-    for (const auto& source : edge_nodes) {
-        auto& source_index = edge_indices[source];
-        
-        // 验证到中心节点的延迟在合理范围内
-        double center_latency = source_index->getNodeLatency(center_node);
-        EXPECT_GE(center_latency, min_center_latency);
-        EXPECT_LE(center_latency, max_center_latency);
-        
-        // 验证到其他节点的延迟
-        for (const auto& target : edge_nodes) {
-            if (source != target) {
-                int i1 = std::stoi(source.substr(5, 1));
-                int j1 = std::stoi(source.substr(7, 1));
-                int i2 = std::stoi(target.substr(5, 1));
-                int j2 = std::stoi(target.substr(7, 1));
-                
-                // 计算曼哈顿距离（最短路径跳数）
-                int manhattan_dist = std::abs(i1 - i2) + std::abs(j1 - j2);
-                double latency = source_index->getNodeLatency(target);
-                
-                // 验证延迟在合理范围内
-                EXPECT_GE(latency, manhattan_dist * min_hop_latency)
-                    << "Latency too low from " << source << " to " << target;
-                EXPECT_LE(latency, manhattan_dist * max_hop_latency)
-                    << "Latency too high from " << source << " to " << target;
-            }
-        }
-    }
-}
-
-TEST_F(EdgeCacheTopologyTest, ZipfDistributionAnalysis) {
-    ZipfDistribution zipf(max_store_block_num, 0.4);
-    
-    // 计算前10个排名的概率
-    std::cout << "Zipf distribution (alpha=0.4) probability analysis:" << std::endl;
-    std::cout << "Rank\tProbability" << std::endl;
-    double sum_prob = 0.0;
-    for (int i = 1; i <= 10; i++) {
-        double prob = zipf.getProbability(i);
-        sum_prob += prob;
-        std::cout << i << "\t" << prob << std::endl;
-    }
-    
-    // 计算累积概率分布
-    std::vector<int> ranges = {15, 30, max_store_block_num};
-    double cumulative_prob = 0.0;
-    std::cout << "\nCumulative probability distribution:" << std::endl;
-    std::cout << "Range\tCumulative Probability" << std::endl;
-    for (int range : ranges) {
-        cumulative_prob = 0.0;
-        for (int i = 1; i <= range; i++) {
-            cumulative_prob += zipf.getProbability(i);
-        }
-        std::cout << "1-" << range << "\t" << cumulative_prob << std::endl;
-    }
-    
-    // 进行采样测试
-    const int sample_size = 100000;
-    std::vector<int> sample_counts(max_store_block_num + 1, 0);
-    
-    for (int i = 0; i < sample_size; i++) {
-        uint32_t sample = zipf.sample();
-        sample_counts[sample]++;
-    }
-    
-    // 输出采样结果的统计信息
-    std::cout << "\nSampling test results (sample_size = {}):" << std::endl;
-    std::cout << "Rank\tFrequency\tEmpirical Probability" << std::endl;
-    for (int i = 1; i <= 10; i++) {
-        double emp_prob = static_cast<double>(sample_counts[i]) / sample_size;
-        std::cout << i << "\t" << sample_counts[i] << "\t" << emp_prob << std::endl;
-    }
-}
-
-TEST_F(EdgeCacheTopologyTest, CompareIndexMemoryUsage) {
-    auto& config = ConfigManager::getInstance();
-    uint32_t block_count = (config.getEdgeCapacityGB() * 1024) / config.getBlockSizeMB();
-    
-    spdlog::info("\nTesting with {} blocks:", block_count);
-    
-    // 1. 创建全MyBloom的索引
-    {
-        ResetEdgeIndex(1000);
-            // 为每个节点分配其偏好的数据流范围
-        std::unordered_map<std::string, std::pair<uint32_t, uint32_t>> node_stream_ranges;
-        uint32_t range_size = max_stream_num / (topu_radius * topu_radius);  // 每个节点偏好的流范围大小
-        
-        // 计算每个节点的基础访问频率（基于到中心的曼哈顿距离）
-        std::unordered_map<std::string, uint32_t> node_base_frequencies;
-        int center_i = topu_radius / 2;
-        int center_j = topu_radius / 2;
-        int max_manhattan_dist = topu_radius - 1;  // 最大曼哈顿距离就是从中心到边缘的距离
-            std::unordered_map<std::string, std::unordered_map<std::string, uint32_t>> 
-            access_records; // node -> block_key -> access_count
-        std::set<std::string> access_blocks_tran_set;
-        spdlog::info("central_edge_node i: {}, j: {}", center_i, center_j);
-        auto allocation_plan = simulateCacheAllocationRound(edge_nodes, topu_radius, node_stream_ranges, node_base_frequencies,
-            centarl_edge_node_access_frequency, edge_node_decay_factor, max_stream_num, query_blocks, access_records, access_blocks_tran_set);
-    }
-    // 计算全MyBloom的内存占用
-    size_t total_memory_bloom = 0;
-    for (const auto& node : edge_nodes) {
-        total_memory_bloom += edge_indices[node]->totalMemoryUsage();
-    }
-
-    // 3. 创建全MixIndex
-    {
-        ResetEdgeIndex(0);
-            // 为每个节点分配其偏好的数据流范围
-        std::unordered_map<std::string, std::pair<uint32_t, uint32_t>> node_stream_ranges;
-        uint32_t range_size = max_stream_num / (topu_radius * topu_radius);  // 每个节点偏好的流范围大小
-        
-        // 计算每个节点的基础访问频率（基于到中心的曼哈顿距离）
-        std::unordered_map<std::string, uint32_t> node_base_frequencies;
-        int center_i = topu_radius / 2;
-        int center_j = topu_radius / 2;
-        int max_manhattan_dist = topu_radius - 1;  // 最大曼哈顿距离就是从中心到边缘的距离
-            std::unordered_map<std::string, std::unordered_map<std::string, uint32_t>> 
-            access_records; // node -> block_key -> access_count
-        std::set<std::string> access_blocks_tran_set;
-        spdlog::info("central_edge_node i: {}, j: {}", center_i, center_j);
-            auto allocation_plan = simulateCacheAllocationRound(edge_nodes, topu_radius, node_stream_ranges, node_base_frequencies,
-        centarl_edge_node_access_frequency, edge_node_decay_factor, max_stream_num, query_blocks, access_records, access_blocks_tran_set);
-    }
-    size_t total_memory_full_mix_before_comress = 0;
-    for (const auto& node : edge_nodes) {
-        total_memory_full_mix_before_comress += edge_indices[node]->totalMemoryUsage();
-    }
-
-    for (auto &[_, index_ptr] : edge_indices) {
-        index_ptr->compress();
-    }
-
-    std::unordered_map<std::string, unordered_map<std::string, int>> index_space_usage;
-    for (const auto& node1 : edge_nodes) {
-        for (const auto& node2 : edge_nodes) {
-            index_space_usage[node1][node2] = edge_indices[node1]->getSingleIndexMemoryUsage(node2);
-        }
-    }
-
-    // 计算全MixIndex的内存占用
-    size_t total_memory_full_mix = 0;
-    for (const auto& node : edge_nodes) {
-        total_memory_full_mix += edge_indices[node]->totalMemoryUsage();
-    }
-
-    // 2. 创建混合索引TRIndex
-    {
-        ResetEdgeIndex(index_constran_lat);
-            // 为每个节点分配其偏好的数据流范围
-        std::unordered_map<std::string, std::pair<uint32_t, uint32_t>> node_stream_ranges;
-        uint32_t range_size = max_stream_num / (topu_radius * topu_radius);  // 每个节点偏好的流范围大小
-        
-        // 计算每个节点的基础访问频率（基于到中心的曼哈顿距离）
-        std::unordered_map<std::string, uint32_t> node_base_frequencies;
-        int center_i = topu_radius / 2;
-        int center_j = topu_radius / 2;
-        int max_manhattan_dist = topu_radius - 1;  // 最大曼哈顿距离就是从中心到边缘的距离
-            std::unordered_map<std::string, std::unordered_map<std::string, uint32_t>> 
-            access_records; // node -> block_key -> access_count
-        std::set<std::string> access_blocks_tran_set;
-        spdlog::info("central_edge_node i: {}, j: {}", center_i, center_j);
-        auto allocation_plan = simulateCacheAllocationRound(edge_nodes, topu_radius, node_stream_ranges, node_base_frequencies,
-            centarl_edge_node_access_frequency, edge_node_decay_factor, max_stream_num, query_blocks, access_records, access_blocks_tran_set);
-    }
-
-    size_t total_memory_mix_before_comress = 0;
-    for (const auto& node : edge_nodes) {
-        total_memory_mix_before_comress += edge_indices[node]->totalMemoryUsage();
-    }
-
-    for (auto &[_, index_ptr] : edge_indices) {
-        index_ptr->compress();
-    }
-    // 计算混合索引的内存占用
-    size_t total_memory_mix = 0;
-    for (const auto& node1 : edge_nodes) {
-        for (const auto& node2 : edge_nodes) {
-            int now_memory = edge_indices[node1]->getSingleIndexMemoryUsage(node2);
-            if (now_memory >= index_space_usage[node1][node2] * 1.1) {
-                total_memory_mix += index_space_usage[node1][node2];
-            } else {
-                total_memory_mix += now_memory;
-            }
-        }
-    }
-    // 输出比较结果
-    spdlog::info("Memory Usage Comparison:");
-    spdlog::info("  All MyBloom(LatencyThreshold=3): {} bytes", total_memory_bloom);
-    spdlog::info("  MixIndex (LatencyThreshold=3):before compress {} bytes", total_memory_mix_before_comress);
-    spdlog::info("  MixIndex (LatencyThreshold=3):after compress {} bytes", total_memory_mix);
-    spdlog::info("  All MixIndex (LatencyThreshold=0):before compress {} bytes", total_memory_full_mix_before_comress);
-    spdlog::info("  All MixIndex (LatencyThreshold=0):after compress {} bytes", total_memory_full_mix);
-}
-
-TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {
+TEST_F(EdgeCacheTRECSTest, QueryTest) {
     // 为每个节点分配其偏好的数据流范围
     std::unordered_map<std::string, std::pair<uint32_t, uint32_t>> node_stream_ranges;
     uint32_t range_size = max_stream_num / (topu_radius * topu_radius);  // 每个节点偏好的流范围大小

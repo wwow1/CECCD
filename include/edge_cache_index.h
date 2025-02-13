@@ -58,7 +58,8 @@ struct MyBloomFilter : public Common::BaseIndex {
     size_t memory_usage() const override {
         std::shared_lock<std::shared_mutex> lock(mutex_);
         // 布隆过滤器的内存使用 = 计数位数组的大小
-        return bloom_filter_.getMemoryUsage();
+        // 底层默认使用8位计数器，但是我们计算的是4位计数器的情况
+        return bloom_filter_.getMemoryUsage() * 3 / 8;
     }
 };
 
@@ -66,6 +67,12 @@ struct MixIndex : public Common::BaseIndex {
     mutable std::shared_mutex mutex_;
     std::unordered_map<uint32_t, roaring::Roaring> index_;
     MixIndex() {}
+
+    void compress() {
+        for(auto &it : index_) {
+            bool compressed = it.second.runOptimize();
+        }
+    }
 
     void add(uint32_t datastreamID, uint32_t blockId) {
         std::unique_lock<std::shared_mutex> lock(mutex_);
@@ -114,11 +121,11 @@ struct MixIndex : public Common::BaseIndex {
             roaring::api::roaring_bitmap_statistics(&pair.second.roaring, &stats);
             
             // 累加所有容器的实际内存使用
-            total_bytes += stats.n_bytes_array_containers;
-            total_bytes += stats.n_bytes_run_containers;
-            total_bytes += stats.n_bytes_bitset_containers;
+            total_bytes += stats.n_bytes_array_containers * 2;
+            total_bytes += stats.n_bytes_run_containers * 2;
+            total_bytes += stats.n_bytes_bitset_containers * 2;
         }
-        
+        spdlog::info("single MixIndex memory usage: {}", total_bytes);
         return total_bytes;
     }
 };
@@ -142,6 +149,17 @@ public:
     EdgeCacheIndex() {}
     
     std::vector<std::string> queryIndex(const std::string& dataKey) const;
+
+    void compress() {
+        for (auto &[node_name, type] : index_type_) {
+            if (type == IndexType::MIX_INDEX) {
+                auto mix_index = dynamic_cast<MixIndex*>(timeseries_main_index_[node_name].get());
+                mix_index->compress();
+            } else {
+                spdlog::info("bloom doesn't need to compress");
+            }
+        }
+    }
 
     tbb::concurrent_hash_map<uint32_t, std::string>& queryMainIndex(const std::string& datastream_id, const uint32_t start_blockId, 
         const uint32_t end_blockId, const uint32_t stream_uniqueId);
