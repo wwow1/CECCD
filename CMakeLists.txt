@@ -260,6 +260,27 @@ if(BUILD_TESTS)
 
     # 添加到测试套件中
     add_test(NAME EdgeCacheTopologyTest COMMAND edge_cache_topology_test)
+
+    # 添加新的测试文件
+    add_executable(edge_cache_trces_test
+        test/googletest/test_edge_cache_trces.cpp
+    )
+
+    target_link_libraries(edge_cache_trces_test
+        PRIVATE
+        gtest
+        gtest_main
+        client
+    )
+
+    target_include_directories(edge_cache_trces_test
+        PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/googletest/googletest/include
+    )
+
+    # 添加到测试套件中
+    add_test(NAME EdgeCacheTrcesTest COMMAND edge_cache_trces_test)
 endif()
 
 # Installation rules
