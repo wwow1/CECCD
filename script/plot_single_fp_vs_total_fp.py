@@ -1,29 +1,34 @@
 # -*- coding: utf-8 -*-
 import matplotlib.pyplot as plt
 import numpy as np
-# motivation
-# zipf = ['1.0', '0.8', '0.6', '0.4', '0.2']
+import matplotlib.font_manager as fm
 
-#false_positive_rates_trindex = [4.8, 4.13, 3.44, 3.05, 2.13, 1.51, 1.22, 0.94]  # 示例数据
+# # 检查是否安装了特定的中文字体
+# font_families = sorted(set(f.name for f in fm.fontManager.ttflist))
+# for font in font_families:
+#     print(font)
+
 plt.rcParams.update({
     'font.sans-serif': 'Noto Sans CJK JP',  # 更通用的中文字体
     'axes.unicode_minus': False            # 显示负号
 })
-# 数据
-# false_positive_rates = [6.24, 8.47, 10.46, 12.81, 14.41]
 
-zipf = ['0.2', '0.4', '0.6', '0.8', '1.0', '1.2', '1.4', '1.6']
-false_positive_rates = [14.05, 12.34, 10.53, 7.96, 5.88, 4.33, 3.01, 2.14]
+# motivation
+single_fp = ['3%', '1%', '0.5%', '0.1%']
+false_positive_rates = [27.18, 10.47, 5.91, 1.22]
 
+false_positive_rates_trindex = [10.96, 3.62, 0, 0]  # 示例数据
 
-false_positive_rates_trindex = [4.8, 4.13, 3.44, 3.05, 2.13, 1.51, 1.22, 0.94]  # 示例数据
+# # 设置中文字体（如果需要显示中文）
+# plt.rcParams['font.sans-serif'] = ['Noto Sans CJK JP']  # 用来正常显示中文标签
+# plt.rcParams['axes.unicode_minus'] = False    # 用来正常显示负号
 
 # 创建图形
 plt.figure(figsize=(10, 6))
 
 # 绘制折线图，使用浅紫色三角形标记
-plt.plot(zipf, false_positive_rates, '-o', color='#B19CD9', linewidth=2, markersize=8, label='HCBF-Tree')  # 使用浅紫色
-plt.plot(zipf, false_positive_rates_trindex, '-^', color='#FF6347', linewidth=2, markersize=8, label='TRQIndex')  # 使用番茄色的实线和圆形标记
+plt.plot(single_fp, false_positive_rates, '-o', color='#B19CD9', linewidth=2, markersize=8, label='HCBF-Tree')  # 使用浅紫色
+plt.plot(single_fp, false_positive_rates_trindex, '-^', color='#FF6347', linewidth=2, markersize=8, label='TRQIndex')  # 使用番茄色的实线和圆形标记
 
 #添加数据标签
 for i, rate in enumerate(false_positive_rates):
@@ -43,7 +48,7 @@ for i, rate in enumerate(false_positive_rates_trindex):
                 va='bottom')
 
 # 设置标题和标签
-plt.xlabel('Zipfian分布参数', fontsize=12)
+plt.xlabel('单个计数布隆过滤器的预期假阳性率参数', fontsize=12)
 plt.ylabel('边缘数据索引的假阳性率 (%)', fontsize=12)
 
 # 设置网格

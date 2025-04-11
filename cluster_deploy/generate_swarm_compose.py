@@ -68,6 +68,33 @@ def generate_swarm_compose():
             }
         }
     
+    # 配置客户端节点
+    for i in range(num_nodes):
+        service_name = f"client{i+1}"
+        host_name = cluster_config['hosts'][i % len(cluster_config['hosts'])]['name']
+        
+        services[service_name] = {
+            "image": get_image_name(),
+            "networks": {
+                "cluster_network": {
+                    "ipv4_address": f"{cluster_config['overlay_network']['edge_ip_prefix']}.{i+num_nodes+2}"
+                }
+            },
+            "environment": [
+                f"POSTGRES_PASSWORD={cluster_config['postgres']['password']}",
+                f"POSTGRES_USER={cluster_config['postgres']['user']}",
+                f"POSTGRES_DB={cluster_config['postgres']['db']}",
+                f"NODE_ID={i+num_nodes+1}"
+            ],
+            "cap_add": ["NET_ADMIN"],
+            "deploy": {
+                "placement": {
+                    "constraints": [f"node.hostname=={host_name}"]
+                },
+                "resources": cluster_config['resources']
+            }
+        }
+    
     compose_dict = {
         "version": "3.8",
         "services": services,
@@ -78,4 +105,4 @@ def generate_swarm_compose():
         yaml.dump(compose_dict, file)
 
 # Example usage
-generate_swarm_compose() 
+generate_swarm_compose()

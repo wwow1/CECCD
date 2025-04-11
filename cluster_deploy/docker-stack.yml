@@ -30,6 +30,74 @@ services:
     networks:
       cluster_network:
         ipv4_address: 172.20.0.2
+  client1:
+    cap_add:
+    - NET_ADMIN
+    deploy:
+      placement:
+        constraints:
+        - node.hostname==ca66
+      resources: *id001
+    environment:
+    - POSTGRES_PASSWORD=password
+    - POSTGRES_USER=postgres
+    - POSTGRES_DB=postgres
+    - NODE_ID=5
+    image: edge_cluster:1
+    networks:
+      cluster_network:
+        ipv4_address: 172.20.1.6
+  client2:
+    cap_add:
+    - NET_ADMIN
+    deploy:
+      placement:
+        constraints:
+        - node.hostname==ca96
+      resources: *id001
+    environment:
+    - POSTGRES_PASSWORD=password
+    - POSTGRES_USER=postgres
+    - POSTGRES_DB=postgres
+    - NODE_ID=6
+    image: edge_cluster:1
+    networks:
+      cluster_network:
+        ipv4_address: 172.20.1.7
+  client3:
+    cap_add:
+    - NET_ADMIN
+    deploy:
+      placement:
+        constraints:
+        - node.hostname==ca66
+      resources: *id001
+    environment:
+    - POSTGRES_PASSWORD=password
+    - POSTGRES_USER=postgres
+    - POSTGRES_DB=postgres
+    - NODE_ID=7
+    image: edge_cluster:1
+    networks:
+      cluster_network:
+        ipv4_address: 172.20.1.8
+  client4:
+    cap_add:
+    - NET_ADMIN
+    deploy:
+      placement:
+        constraints:
+        - node.hostname==ca96
+      resources: *id001
+    environment:
+    - POSTGRES_PASSWORD=password
+    - POSTGRES_USER=postgres
+    - POSTGRES_DB=postgres
+    - NODE_ID=8
+    image: edge_cluster:1
+    networks:
+      cluster_network:
+        ipv4_address: 172.20.1.9
   edge1:
     cap_add:
     - NET_ADMIN

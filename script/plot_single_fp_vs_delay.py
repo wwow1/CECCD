@@ -2,75 +2,76 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker  # 导入ticker模块
 
 import numpy as np
+
 plt.rcParams.update({
     'font.sans-serif': 'Noto Sans CJK JP',  # 更通用的中文字体
     'axes.unicode_minus': False            # 显示负号
 })
+
 # 数据
-network_sizes = ['0.2', '0.4', '0.6', '0.8', '1.0', '1.2', '1.4', '1.6']
+single_fp = ['3%', '1%', '0.5%', '0.1%']
 # 平均延时（ms）
-hcbf_avg_times =       [8.10, 7.31, 6.55, 5.23, 4.37, 3.54, 2.86, 2.48]
-trindex_avg_times =    [7.25, 6.56, 5.89, 4.77, 4.01, 3.28, 2.71, 2.37]  # 示例数据
+hcbf_avg_times =       [6.61, 5.14, 5.11, 4.61]
+trindex_avg_times =    [4.93, 4.68, 4.62, 4.57]  # 示例数据
 allroaring_avg_times = []  # 示例数据
 
 # P90延时（ms）
-hcbf_p90_times =       [13.60, 12.15, 10.98, 10.63, 10.42, 9.86, 8.51, 5.92]
-trindex_p90_times =    [10.71, 10.44, 10.69, 10.21, 10.09, 9.62, 8.44, 5.92]  # 示例数据
+hcbf_p90_times =       [17.76, 9.94, 9.84, 9.77]
+trindex_p90_times =    [9.94, 9.67, 9.66,9.57]  # 示例数据
 allroaring_p90_times = []  # 示例数据
 
 # P95延时（ms）
-hcbf_p95_times =       [18.14, 17.46, 16.86, 14.18, 12.14, 10.79, 10.02, 9.10]  # 示例数据
-trindex_p95_times =    [10.92, 10.90, 10.85, 10.69, 10.62, 10.40, 9.67, 8.95]  # 示例数据
+hcbf_p95_times =       [20.47, 16.36, 12.41, 9.81]  # 示例数据
+trindex_p95_times =    [12.58, 9.94, 9.82, 9.78]  # 示例数据
 allroaring_p95_times = []  # 示例数据
 
 # P99延时（ms）
-hcbf_p99_times =       [22.84, 22.78, 21.96, 21.21, 20.81, 19.86, 17.58, 15.54]  # 示例数据
-trindex_p99_times =    [13.36, 13.27, 12.87, 12.53, 12.26, 11.13, 10.93, 10.73]  # 示例数据
+hcbf_p99_times =       [24.47, 21.84, 21.77, 12.83]  # 示例数据
+trindex_p99_times =    [14.88, 13.18, 9.95, 9.92]  # 示例数据
 allroaring_p99_times = []  # 示例数据
 
 # 创建子图
 fig, axs = plt.subplots(2, 2, figsize=(12, 10))
 
 # 绘制平均延时图
-axs[0, 0].plot(network_sizes, hcbf_avg_times, '-o', color='#B19CD9', label='HCBF-Tree')
-axs[0, 0].plot(network_sizes, trindex_avg_times, '-^', color='#FF6347', label='TRQIndex')
+axs[0, 0].plot(single_fp, hcbf_avg_times, '-o', color='#B19CD9', label='HCBF-Tree')
+axs[0, 0].plot(single_fp, trindex_avg_times, '-^', color='#FF6347', label='TRQIndex')
 #axs[0, 0].plot(network_sizes, allroaring_avg_times, '-o', color='#87CEFA', label='AllRoaring')
 axs[0, 0].set_title('平均数据检索延时')
-axs[0, 0].set_xlabel('Zipfian分布参数')
+axs[0, 0].set_xlabel('单个计数布隆过滤器的预期假阳性率参数')
 axs[0, 0].set_ylabel('数据检索延时 (ms)')
 axs[0, 0].legend()
 axs[0, 0].grid(True)
 
 # 绘制P90延时图
-axs[0, 1].plot(network_sizes, hcbf_p90_times, '-o', color='#B19CD9', label='HCBF-Tree')
-axs[0, 1].plot(network_sizes, trindex_p90_times, '-^', color='#FF6347', label='TRQIndex')
+axs[0, 1].plot(single_fp, hcbf_p90_times, '-o', color='#B19CD9', label='HCBF-Tree')
+axs[0, 1].plot(single_fp, trindex_p90_times, '-^', color='#FF6347', label='TRQIndex')
 #axs[0, 1].plot(network_sizes, allroaring_p90_times, '-o', color='#87CEFA', label='AllRoaring')
 axs[0, 1].set_title('P90数据检索延时')
-axs[0, 1].set_xlabel('Zipfian分布参数')
+axs[0, 1].set_xlabel('单个计数布隆过滤器的预期假阳性率参数')
 axs[0, 1].set_ylabel('数据检索延时 (ms)')
 axs[0, 1].legend()
 axs[0, 1].grid(True)
 
 # 绘制P95延时图
-axs[1, 0].plot(network_sizes, hcbf_p95_times, '-o', color='#B19CD9', label='HCBF-Tree')
-axs[1, 0].plot(network_sizes, trindex_p95_times, '-^', color='#FF6347', label='TRQIndex')
+axs[1, 0].plot(single_fp, hcbf_p95_times, '-o', color='#B19CD9', label='HCBF-Tree')
+axs[1, 0].plot(single_fp, trindex_p95_times, '-^', color='#FF6347', label='TRQIndex')
 #axs[1, 0].plot(network_sizes, allroaring_p95_times, '-o', color='#87CEFA', label='AllRoaring')
 axs[1, 0].set_title('P95数据检索延时')
-axs[1, 0].set_xlabel('Zipfian分布参数')
+axs[1, 0].set_xlabel('单个计数布隆过滤器的预期假阳性率参数')
 axs[1, 0].set_ylabel('数据检索延时 (ms)')
 axs[1, 0].legend()
 axs[1, 0].grid(True)
 
 # 绘制P99延时图
-axs[1, 1].plot(network_sizes, hcbf_p99_times, '-o', color='#B19CD9', label='HCBF-Tree')
-axs[1, 1].plot(network_sizes, trindex_p99_times, '-^', color='#FF6347', label='TRQIndex')
+axs[1, 1].plot(single_fp, hcbf_p99_times, '-o', color='#B19CD9', label='HCBF-Tree')
+axs[1, 1].plot(single_fp, trindex_p99_times, '-^', color='#FF6347', label='TRQIndex')
 #axs[1, 1].plot(network_sizes, allroaring_p99_times, '-o', color='#87CEFA', label='AllRoaring')
 axs[1, 1].set_title('P99数据检索延时')
-axs[1, 1].set_xlabel('Zipfian分布参数')
+axs[1, 1].set_xlabel('单个计数布隆过滤器的预期假阳性率参数')
 axs[1, 1].set_ylabel('数据检索延时 (ms)')
-axs[1, 1].set_ylim(10, 30)  # 设置y轴范围
 axs[1, 1].yaxis.set_major_locator(ticker.MaxNLocator(integer=True))  # 设置y轴刻度为整数
-axs[1, 1].legend(loc='upper right')
+axs[1, 1].legend()
 axs[1, 1].grid(True)
 
 # 调整布局并保存图形

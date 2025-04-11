@@ -32,7 +32,7 @@ protected:
                 
                 // 为每个节点创建一个EdgeCacheIndex实例
                 auto edge_index = std::make_unique<EdgeCacheIndex>();
-                edge_index->setLatencyThreshold(10000); // 设置很高的阈值，确保使用布隆过滤器
+                edge_index->setLatencyThreshold(1000); // 设置很高的阈值，确保使用布隆过滤器
                 edge_indices[node_id] = std::move(edge_index);
             }
         }
@@ -116,6 +116,7 @@ protected:
                         for (int hop = 0; hop < hops; hop++) {
                             total_latency += generateHopLatency();
                         }
+                        spdlog::info("lat: {} to {} is {}ms", current, target, total_latency);
                         current_index->setNodeLatency(target, total_latency);
                     }
                 }
@@ -167,19 +168,19 @@ protected:
     std::unordered_map<std::string, std::unique_ptr<EdgeCacheIndex>> edge_indices;
     std::vector<std::string> edge_nodes;
     std::string center_node;
-    int topu_radius = 5;
     int hops_lat = 4;
-    int index_constran_lat = 3;
     int center_lat = 10;
     //int query_blocks = 4;
     uint32_t max_cache_block_num = 2048;
     uint32_t max_store_block_num = 150;
-    uint32_t max_stream_num = 1400;
     int time_range[4] = {1, 3, 5, 7};
-    uint32_t centarl_edge_node_access_frequency = 100000;     // 中心节点的基准访问频次
+    uint32_t centarl_edge_node_access_frequency = 10000;     // 中心节点的基准访问频次
     double edge_node_decay_factor = 0.4;             // 边缘节点的访问频次衰减因子（相对于中心节点）
     
-    bool split_stream = true;
+    bool split_stream = false;
+    int index_constran_lat = 3;
+    int topu_radius = 5;
+    uint32_t max_stream_num = 1400;
     ZipfDistribution prepare_block_zipf{max_store_block_num, 1.6};  // 块访问的 Zipf 分布
     ZipfDistribution test_block_zipf{max_store_block_num, 1.6};
     
@@ -418,22 +419,6 @@ protected:
                 }
             }
         }
-
-        // // 输出内存使用对比
-        // for (const auto& node : edge_nodes) {
-        //     for (const auto& other_node : edge_nodes) {
-        //         if (node != other_node) {
-        //             size_t bloom_memory = edge_indices[node]->getSingleIndexMemoryUsage(other_node);
-        //             size_t hashmap_memory = getHashMapMemoryUsage(node);
-                    
-        //             spdlog::info("Memory Usage Comparison - Node: {} -> {}", node, other_node);
-        //             spdlog::info("  Bloom Filter: {} bytes", bloom_memory);
-        //             spdlog::info("  Hash Map: {} bytes", hashmap_memory);
-        //             spdlog::info("  Memory Saving: {:.2f}%", 
-        //                 100.0 * (hashmap_memory - bloom_memory) / hashmap_memory);
-        //         }
-        //     }
-        // }
     }
     // 在类成员变量中添加随机数生成器
     std::mt19937 rng{std::random_device{}()};
@@ -560,7 +545,7 @@ TEST_F(EdgeCacheTopologyTest, BasicTopologySetup) {
 }
 
 TEST_F(EdgeCacheTopologyTest, ZipfDistributionAnalysis) {
-    ZipfDistribution zipf(max_store_block_num, 0.4);
+    ZipfDistribution zipf(max_store_block_num, 1.0);
     
     // 计算前10个排名的概率
     std::cout << "Zipf distribution (alpha=0.4) probability analysis:" << std::endl;
@@ -573,7 +558,7 @@ TEST_F(EdgeCacheTopologyTest, ZipfDistributionAnalysis) {
     }
     
     // 计算累积概率分布
-    std::vector<int> ranges = {15, 30, max_store_block_num};
+    std::vector<int> ranges = {15, 30, 45, 60, 75, 90};
     double cumulative_prob = 0.0;
     std::cout << "\nCumulative probability distribution:" << std::endl;
     std::cout << "Range\tCumulative Probability" << std::endl;
@@ -668,7 +653,7 @@ TEST_F(EdgeCacheTopologyTest, CompareIndexMemoryUsage) {
             index_space_usage[node1][node2] = edge_indices[node1]->getSingleIndexMemoryUsage(node2);
         }
     }
-
+    std::cout << "111 " << std::endl;
     // 计算全MixIndex的内存占用
     size_t total_memory_full_mix = 0;
     for (const auto& node : edge_nodes) {
@@ -695,6 +680,7 @@ TEST_F(EdgeCacheTopologyTest, CompareIndexMemoryUsage) {
             centarl_edge_node_access_frequency, edge_node_decay_factor, max_stream_num, access_records, access_blocks_tran_set);
     }
 
+    std::cout << "222 " << std::endl;
     size_t total_memory_mix_before_comress = 0;
     for (const auto& node : edge_nodes) {
         total_memory_mix_before_comress += edge_indices[node]->totalMemoryUsage();
@@ -717,7 +703,7 @@ TEST_F(EdgeCacheTopologyTest, CompareIndexMemoryUsage) {
     }
     // 输出比较结果
     spdlog::info("Memory Usage Comparison:");
-    spdlog::info("  All MyBloom(LatencyThreshold=3): {} bytes", total_memory_bloom);
+    spdlog::info("  All MyBloom(LatencyThreshold=1000): {} bytes", total_memory_bloom);
     spdlog::info("  MixIndex (LatencyThreshold=3):before compress {} bytes", total_memory_mix_before_comress);
     spdlog::info("  MixIndex (LatencyThreshold=3):after compress {} bytes", total_memory_mix);
     spdlog::info("  All MixIndex (LatencyThreshold=0):before compress {} bytes", total_memory_full_mix_before_comress);
@@ -772,7 +758,8 @@ TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {
             }
             
             // 为整个查询生成一个用户延迟（假设用户位置在查询期间不变）
-            double user_latency = generateUserLatency();
+            // double user_latency = generateUserLatency();
+            double user_latency = 0;
             double max_actual_latency = 0;  // 初始化为用户延迟
             double max_optimal_latency = 0; // 初始化为用户延迟
             
@@ -809,6 +796,7 @@ TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {
                 } else {
                     found_node = center_node;
                 }
+
                 // 超出跳数限制，不如直接访问中心节点
                 if (edge_indices[node]->getNodeLatency(center_node) <= edge_indices[node]->getNodeLatency(found_node)) {
                     found_node = center_node;
@@ -823,8 +811,10 @@ TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {
                             local_fount++;
                             // spdlog::info("query found in loacl edge_server. lat:{}", latency);
                         }
-                        max_actual_latency = std::max(max_actual_latency, latency);
-                        max_optimal_latency = std::max(max_optimal_latency, latency);
+                        actual_latencies.push_back(latency);
+                        optimal_latencies.push_back(latency);
+                        // max_actual_latency = std::max(max_actual_latency, latency);
+                        // max_optimal_latency = std::max(max_optimal_latency, latency);
                         find_count++;
                         continue;
                     }
@@ -834,34 +824,38 @@ TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {
                     double actual_latency = user_latency + 
                                         edge_indices[node]->getNodeLatency(found_node) * 2 +
                                         (edge_indices[node]->getNodeLatency(center_node) + 0.0);
-                    max_actual_latency = std::max(max_actual_latency, actual_latency);
-                    
+                    // max_actual_latency = std::max(max_actual_latency, actual_latency);
+                    actual_latencies.push_back(actual_latency);
                     // 如果超过跳数约束，计算理想情况的延迟
                     if (edge_indices[node]->getNodeLatency(found_node) >= index_constran_lat) {
                         double optimal_latency = user_latency + 
                                             edge_indices[node]->getNodeLatency(center_node);
-                        max_optimal_latency = std::max(max_optimal_latency, optimal_latency);
+                        optimal_latencies.push_back(optimal_latency);
+                        // max_optimal_latency = std::max(max_optimal_latency, optimal_latency);
                     } else {
-                        max_optimal_latency = std::max(max_optimal_latency, actual_latency);
+                        // max_optimal_latency = std::max(max_optimal_latency, actual_latency);
+                        optimal_latencies.push_back(actual_latency);
                         optimal_false_positives++;
                     }
                 } else {
                     not_fount++;
                     double actual_latency = user_latency + edge_indices[node]->getNodeLatency(center_node);
                     double optimal_latency = actual_latency;
-                    max_actual_latency = std::max(max_actual_latency, actual_latency);
-                    max_optimal_latency = std::max(max_optimal_latency, optimal_latency);
+                    // max_actual_latency = std::max(max_actual_latency, actual_latency);
+                    // max_optimal_latency = std::max(max_optimal_latency, optimal_latency);
+                    actual_latencies.push_back(actual_latency);
+                    optimal_latencies.push_back(optimal_latency);
                 }
             }
-            // 只有当查询包含至少一个block时才记录延迟
-            if (max_actual_latency > 0) {
-                actual_latencies.push_back(max_actual_latency);
-            } else {
-                spdlog::info("no lat, {}", max_actual_latency);
-            }
-            if (max_optimal_latency > 0) {
-                optimal_latencies.push_back(max_optimal_latency);
-            }
+            // // 只有当查询包含至少一个block时才记录延迟
+            // if (max_actual_latency > 0) {
+            //     actual_latencies.push_back(max_actual_latency);
+            // } else {
+            //     spdlog::info("no lat, {}", max_actual_latency);
+            // }
+            // if (max_optimal_latency > 0) {
+            //     optimal_latencies.push_back(max_optimal_latency);
+            // }
         }
     }
     uint64_t test_block_and_not_found_in_tran_set = 0;
@@ -903,4 +897,119 @@ TEST_F(EdgeCacheTopologyTest, BlockAdditionAndQuery) {
 
     calculate_stats(actual_latencies, "Actual");
     calculate_stats(optimal_latencies, "Optimal");
+}
+
+TEST_F(EdgeCacheTopologyTest, CompressedBitmapMemoryUsage) {
+    // 重置索引，使用较大的延迟阈值确保使用压缩位图
+    ResetEdgeIndex(0);
+    
+    spdlog::info("\nTesting Compressed Bitmap Memory Usage:");
+    
+    // 第一阶段：插入连续数据块
+    const uint32_t continuous_start = 1000;
+    const uint32_t continuous_length = 1000;  // 插入1000个连续块
+    const uint32_t stream_id = 1;
+    
+    // 记录压缩前的内存占用
+    size_t memory_before_continuous = 0;
+    for (const auto& node : edge_nodes) {
+        memory_before_continuous += edge_indices[node]->totalMemoryUsage();
+    }
+    spdlog::info("Memory usage before inserting continuous blocks: {} bytes", memory_before_continuous);
+    
+    // 插入连续数据块
+    for (uint32_t block_id = continuous_start; block_id < continuous_start + continuous_length; block_id++) {
+        // 选择一个固定的源节点和目标节点进行测试
+        std::string source_node = edge_nodes[0];
+        std::string target_node = edge_nodes[1];
+        edge_indices[source_node]->addBlock(block_id, target_node, stream_id);
+    }
+    
+    // 记录压缩前的内存占用
+    size_t memory_after_continuous_before_compress = 0;
+    for (const auto& node : edge_nodes) {
+        memory_after_continuous_before_compress += edge_indices[node]->totalMemoryUsage();
+    }
+    spdlog::info("Memory usage after inserting continuous blocks (before compress): {} bytes", 
+                 memory_after_continuous_before_compress);
+    
+    // 执行压缩
+    for (auto &[_, index_ptr] : edge_indices) {
+        index_ptr->compress();
+    }
+    
+    // 记录压缩后的内存占用
+    size_t memory_after_continuous_compressed = 0;
+    for (const auto& node : edge_nodes) {
+        memory_after_continuous_compressed += edge_indices[node]->totalMemoryUsage();
+    }
+    spdlog::info("Memory usage after compressing continuous blocks: {} bytes", 
+                 memory_after_continuous_compressed);
+    
+    // 第二阶段：插入不连续数据块
+    const uint32_t scattered_count = 20;  // 插入200个散布的块
+    std::vector<uint32_t> scattered_blocks;
+    
+    // 生成不连续的块ID
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<uint32_t> dist(3000, 10000);
+    for (uint32_t i = 0; i < scattered_count; i++) {
+        scattered_blocks.push_back(dist(gen));
+    }
+    
+    // 记录插入散布块之前的内存占用
+    size_t memory_before_scattered = 0;
+    for (const auto& node : edge_nodes) {
+        memory_before_scattered += edge_indices[node]->totalMemoryUsage();
+    }
+    spdlog::info("Memory usage before inserting scattered blocks: {} bytes", 
+                 memory_before_scattered);
+    
+    // 插入散布的数据块
+    for (uint32_t block_id : scattered_blocks) {
+        std::string source_node = edge_nodes[0];
+        std::string target_node = edge_nodes[1];
+        edge_indices[source_node]->addBlock(block_id, target_node, stream_id);
+    }
+    
+    // 记录压缩前的内存占用
+    size_t memory_after_scattered_before_compress = 0;
+    for (const auto& node : edge_nodes) {
+        memory_after_scattered_before_compress += edge_indices[node]->totalMemoryUsage();
+    }
+    spdlog::info("Memory usage after inserting scattered blocks (before compress): {} bytes", 
+                 memory_after_scattered_before_compress);
+    
+    // 再次执行压缩
+    for (auto &[_, index_ptr] : edge_indices) {
+        index_ptr->compress();
+    }
+    
+    // 记录最终压缩后的内存占用
+    size_t memory_final = 0;
+    for (const auto& node : edge_nodes) {
+        memory_final += edge_indices[node]->totalMemoryUsage();
+    }
+    spdlog::info("Final memory usage after compressing all blocks: {} bytes", memory_final);
+    
+    // 输出压缩率统计
+    double continuous_compression_ratio = static_cast<double>(memory_after_continuous_compressed) / 
+                                       memory_after_continuous_before_compress;
+    double scattered_compression_ratio = static_cast<double>(memory_final) / 
+                                       memory_after_scattered_before_compress;
+    
+    spdlog::info("Compression Statistics:");
+    spdlog::info("  Continuous blocks compression ratio: {:.2f}", continuous_compression_ratio);
+    spdlog::info("  Scattered blocks compression ratio: {:.2f}", scattered_compression_ratio);
+    
+    // 验证压缩效果
+    EXPECT_LT(memory_after_continuous_compressed, memory_after_continuous_before_compress) 
+        << "Compression should reduce memory usage for continuous blocks";
+    EXPECT_LT(memory_final, memory_after_scattered_before_compress) 
+        << "Compression should reduce memory usage for scattered blocks";
+    
+    // 验证连续块的压缩效果应该比散布块更好
+    EXPECT_LT(continuous_compression_ratio, scattered_compression_ratio) 
+        << "Continuous blocks should have better compression ratio than scattered blocks";
 }

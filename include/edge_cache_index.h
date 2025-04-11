@@ -58,7 +58,7 @@ struct MyBloomFilter : public Common::BaseIndex {
     size_t memory_usage() const override {
         std::shared_lock<std::shared_mutex> lock(mutex_);
         // 布隆过滤器的内存使用 = 计数位数组的大小
-        // 底层默认使用8位计数器，但是我们计算的是4位计数器的情况
+        // 底层默认使用8位计数器，但是我们计算的是3位计数器的情况
         return bloom_filter_.getMemoryUsage() * 3 / 8;
     }
 };
@@ -140,7 +140,7 @@ private:
         BLOOM_FILTER
     };
     std::unordered_map<std::string, IndexType> index_type_;
-    std::unordered_map<std::string, int64_t> node_latencies_;
+    std::unordered_map<std::string, double> node_latencies_;
     int64_t config_latency_threshold_ms_ = 30; // 默认阈值为30ms
 
     std::unique_ptr<Common::BaseIndex> createIndex(const std::string& nodeId);
@@ -164,10 +164,10 @@ public:
     tbb::concurrent_hash_map<uint32_t, std::string>& queryMainIndex(const std::string& datastream_id, const uint32_t start_blockId, 
         const uint32_t end_blockId, const uint32_t stream_uniqueId);
 
-    void setNodeLatency(const std::string& nodeId, int64_t latency);
+    void setNodeLatency(const std::string& nodeId, double latency);
     void setLatencyThreshold(int64_t threshold);
 
-    int64_t getNodeLatency(const std::string& nodeId) const;
+    double getNodeLatency(const std::string& nodeId) const;
     void addBlock(uint32_t block_id,
                  const std::string& node_id,
                  uint32_t stream_unique_id);

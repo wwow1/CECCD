@@ -152,7 +152,6 @@ protected:
     int hops_lat = 4;
     int index_constran_lat = 3;
     int center_lat = 10;
-    uint32_t max_cache_block_num = 2048;
     uint32_t block_size_ = 512; // KB
     uint32_t max_store_block_num = 150;
     uint32_t max_stream_num = 1400;
@@ -166,10 +165,11 @@ protected:
     int time_range[4] = {1, 3, 5, 7};
     double selectivity_range[6] = {0.01, 0.1, 0.1, 0.2, 0.9, 0.9};
 
-    bool split_stream = true;
+    bool split_stream = false;
+    uint32_t max_cache_block_num = 4096;
     CacheStrategy cache_strategy_type = CacheStrategy::TRECS;
-    ZipfDistribution prepare_block_zipf{max_store_block_num, 1.6};  // 块访问的 Zipf 分布
-    ZipfDistribution test_block_zipf{max_store_block_num, 1.6};
+    ZipfDistribution prepare_block_zipf{max_store_block_num, 0.6};  // 块访问的 Zipf 分布
+    ZipfDistribution test_block_zipf{max_store_block_num, 0.6};
 
     // 添加生成用户延迟的方法
     double generateUserLatency() {
@@ -325,7 +325,7 @@ protected:
                           // spdlog::info("i'am lecs");
                           double center_lat = access_count * edge_indices[access_node]->getNodeLatency(center_node) * 2;
                           double cache_lat = access_count * edge_indices[access_node]->getNodeLatency(cache_node) * 2;
-                          qccv += static_cast<double>(center_lat - cache_lat) + (1 - selectivity);
+                          qccv += static_cast<double>(center_lat - cache_lat);// + (1 - selectivity);
                         } else if (cache_strategy_type == CacheStrategy::TRECS) {
                           double center_lat = access_count * (ssd_read_block_ms + edge_indices[access_node]->getNodeLatency(center_node) * 2 + network_trans_ms * selectivity);
                           double cache_lat = access_count * (edge_indices[access_node]->getNodeLatency(cache_node) * 2 + network_trans_ms * selectivity);
@@ -637,7 +637,7 @@ TEST_F(EdgeCacheTRECSTest, QueryTest) {
                     found_node = center_node;
                 }
                 if (edge_indices[node]->getNodeLatency(center_node) <= edge_indices[node]->getNodeLatency(found_node)) {
-                    std::cout<<"tesyes" << std::endl;
+                    // std::cout<<"tesyes" << std::endl;
                     found_node = center_node;
                 }
                 const auto& node_blocks = allocation_plan[found_node];
@@ -692,7 +692,7 @@ TEST_F(EdgeCacheTRECSTest, QueryTest) {
             total_sub_query_latency += max_sub_query_latency; // 累加子查询延时
             // network_flow_KB += total_data * block_size_;
             // double single_query_latency = edge_compute_ms + max_sub_query_latency + total_data * network_trans_ms + user_latency * 2;
-            double single_query_latency = edge_compute_ms + max_sub_query_latency + user_latency * 2;
+            double single_query_latency = edge_compute_ms / 2 + max_sub_query_latency + user_latency * 2;
             total_query_latencies += single_query_latency;
 
             // 在查询循环中，记录每个子查询的延时

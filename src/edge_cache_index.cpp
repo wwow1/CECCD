@@ -16,11 +16,11 @@ std::unique_ptr<Common::BaseIndex> EdgeCacheIndex::createIndex(const std::string
     }
 }
 
-void EdgeCacheIndex::setNodeLatency(const std::string& nodeId, int64_t latency) {
+void EdgeCacheIndex::setNodeLatency(const std::string& nodeId, double latency) {
     node_latencies_[nodeId] = latency;
 }
 
-int64_t EdgeCacheIndex::getNodeLatency(const std::string& nodeId) const {
+double EdgeCacheIndex::getNodeLatency(const std::string& nodeId) const {
     if (node_latencies_.find(nodeId) == node_latencies_.end()) {
         spdlog::error("Attempting to get latency for non-existent node: {}", nodeId);
         // 返回一个默认值或抛出更明确的异常
@@ -53,8 +53,21 @@ tbb::concurrent_hash_map<uint32_t, std::string>& EdgeCacheIndex::queryMainIndex(
         
         for(const auto& block_id : matched_blocks) {
             typename tbb::concurrent_hash_map<uint32_t, std::string>::accessor accessor;
-            results.insert(accessor, block_id);
-            accessor->second = neighbor_nodeId;
+            bool inserted = results.insert(accessor, block_id);
+            
+            // 如果插入成功，直接设置为当前的 neighbor_nodeId
+            if (inserted) {
+                accessor->second = neighbor_nodeId;
+            } else {
+                // 如果已经存在，比较延迟
+                int64_t current_latency = getNodeLatency(neighbor_nodeId);
+                int64_t existing_latency = getNodeLatency(accessor->second);
+                
+                // 选择延迟更低的 neighbor_nodeId
+                if (current_latency < existing_latency) {
+                    accessor->second = neighbor_nodeId;
+                }
+            }
         }
     }
     
