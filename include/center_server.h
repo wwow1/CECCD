@@ -96,6 +96,9 @@ private:
     // 全局 schema 管理
     std::mutex schema_mutex_;
     std::unordered_map<std::string, Common::StreamMeta> schema_;
+    // 移除原来的 db_conn_ 成员变量
+    // 添加以下头文件包含
+    #include "db_connection_pool.h"
 
     // 当前周期的统计数据
     std::unordered_map<std::string, BlockStats> current_period_stats_;

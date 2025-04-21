@@ -26,6 +26,15 @@ CenterServer::CenterServer() {
     prediction_period_ = std::chrono::seconds(config.getPredictionPeriod());
     current_period_start_ = std::chrono::system_clock::now();
 
+    std::string conn_str = config.getNodeDatabaseConfig(center_addr_).getConnectionString();
+    try {
+        spdlog::info("Initializing database connection pool: {}", conn_str);
+        DBConnectionPool::getInstance().initialize(conn_str);
+    } catch (const std::exception& e) {
+        spdlog::error("Failed to initialize connection pool: {}", e.what());
+        throw;
+    }
+    
     spdlog::info("CenterServer initialized with block size: {} bytes", block_size_);
 }
 
@@ -243,7 +252,8 @@ void CenterServer::executeCacheReplacement(
             blocks_to_remove[edge_server_address].empty()) {
             continue;
         }
-        
+        spdlog::info("Executing cache replacement for node {}: add blocks:{}, remove blocks:{}", 
+            edge_server_address, blocks_to_add[edge_server_address].size(), blocks_to_remove[edge_server_address].size());
         executeNodeCacheUpdate(
             edge_server_address, 
             blocks_to_add[edge_server_address], 
@@ -600,41 +610,48 @@ uint64_t CenterServer::calculateTimeRange(const std::string& table_name, size_t 
 void CenterServer::initializeSchema() {
     auto& db_config = ConfigManager::getInstance().getDatabaseConfig();
     spdlog::info("Database config: {}", db_config.getConnectionString());
-    pqxx::connection conn(db_config.getConnectionString());
-    pqxx::work txn(conn);
+    
+    auto conn = DBConnectionPool::getInstance().getConnection();
+    try {
+        pqxx::work txn(*conn);
+        // 获取所有表名
+        pqxx::result tables = txn.exec("SELECT table_name FROM information_schema.tables WHERE table_schema='public'");
 
-    // 获取所有表名
-    pqxx::result tables = txn.exec("SELECT table_name FROM information_schema.tables WHERE table_schema='public'");
+        for (const auto& row : tables) {
+            std::string table_name = row["table_name"].c_str();
+            uint32_t unique_id = generateUniqueId(table_name);
 
-    for (const auto& row : tables) {
-        std::string table_name = row["table_name"].c_str();
-        uint32_t unique_id = generateUniqueId(table_name);
+            // 使用 ROUND 函数将浮点数四舍五入为整数
+            pqxx::result avg_size = txn.exec(
+                "SELECT ROUND(AVG(pg_column_size(t.*))) as avg_row_size "
+                "FROM " + table_name + " t "
+                "TABLESAMPLE SYSTEM(1)"  // 采样1%的数据
+            );
+            size_t avg_row_size = avg_size[0]["avg_row_size"].as<size_t>();
 
-        // 使用 ROUND 函数将浮点数四舍五入为整数
-        pqxx::result avg_size = txn.exec(
-            "SELECT ROUND(AVG(pg_column_size(t.*))) as avg_row_size "
-            "FROM " + table_name + " t "
-            "TABLESAMPLE SYSTEM(1)"  // 采样1%的数据
-        );
-        size_t avg_row_size = avg_size[0]["avg_row_size"].as<size_t>();
+            // 获取表中最小的 date_time，使用 CAST 转换为 bigint
+            pqxx::result min_time = txn.exec(
+                "SELECT CAST(MIN(date_time) AS bigint) as min_time FROM " + table_name
+            );
+            uint64_t start_time = min_time[0]["min_time"].as<uint64_t>();
 
-        // 获取表中最小的 date_time，使用 CAST 转换为 bigint
-        pqxx::result min_time = txn.exec(
-            "SELECT CAST(MIN(date_time) AS bigint) as min_time FROM " + table_name
-        );
-        uint64_t start_time = min_time[0]["min_time"].as<uint64_t>();
+            size_t rows_per_block = block_size_ / avg_row_size;
+            uint64_t time_range = calculateTimeRange(table_name, rows_per_block, txn);
 
-        size_t rows_per_block = block_size_ / avg_row_size;
-        uint64_t time_range = calculateTimeRange(table_name, rows_per_block, txn);
-
-        Common::StreamMeta meta;
-        meta.datastream_id_ = table_name;
-        meta.unique_id_ = unique_id;
-        meta.start_time_ = start_time;
-        meta.time_range_ = time_range;
-        updateSchema(table_name, meta);
-        
-        spdlog::info("Updated schema for table {}, unique_id {}, start_time {}, time_range {}, avg_row_size {}, rows_per_block {}", table_name, unique_id, start_time, time_range, avg_row_size, rows_per_block);
+            Common::StreamMeta meta;
+            meta.datastream_id_ = table_name;
+            meta.unique_id_ = unique_id;
+            meta.start_time_ = start_time;
+            meta.time_range_ = time_range;
+            updateSchema(table_name, meta);
+            
+            spdlog::info("Updated schema for table {}, unique_id {}, start_time {}, time_range {}, avg_row_size {}, rows_per_block {}", table_name, unique_id, start_time, time_range, avg_row_size, rows_per_block);
+        }
+        DBConnectionPool::getInstance().returnConnection(conn);
+    } catch (const std::exception& e) {
+        DBConnectionPool::getInstance().returnConnection(conn);
+        spdlog::error("Error initializing schema: {}", e.what());
+        throw;
     }
 }
 
@@ -781,13 +798,10 @@ grpc::Status CenterServer::ExecuteNetworkMeasurement(grpc::ServerContext* contex
 grpc::Status CenterServer::SubQuery(grpc::ServerContext* context,
                                 const cloud_edge_cache::QueryRequest* request,
                                 cloud_edge_cache::SubQueryResponse* response) {
-    spdlog::info("Center received SubQuery request sql_query = {} block_id = {} stream_unique_id = {}", request->sql_query(), request->block_id(), request->stream_unique_id());
+    std::cout << "Received SubQuery request: " << request->sql_query() << std::endl;
+    auto conn = DBConnectionPool::getInstance().getConnection();
     try {
-        auto& config = ConfigManager::getInstance();
-        std::string conn_str = config.getNodeDatabaseConfig(center_addr_).getConnectionString();
-        
-        pqxx::connection conn(conn_str);
-        pqxx::work txn(conn);
+        pqxx::work txn(*conn);
         pqxx::result db_result = txn.exec(request->sql_query());
         txn.commit();
 
@@ -818,12 +832,13 @@ grpc::Status CenterServer::SubQuery(grpc::ServerContext* context,
                 }
             }
         }
-
+        DBConnectionPool::getInstance().returnConnection(conn);
         return grpc::Status::OK;
     } catch (const std::exception& e) {
         spdlog::error("Error in SubQuery: {}", e.what());
         response->set_status(cloud_edge_cache::SubQueryResponse::ERROR);
         response->set_error_message(e.what());
+        DBConnectionPool::getInstance().returnConnection(conn);
         return grpc::Status(grpc::StatusCode::INTERNAL, e.what());
     }
 }

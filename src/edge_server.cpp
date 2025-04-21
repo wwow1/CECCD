@@ -753,6 +753,7 @@ void EdgeServer::addDataBlock(const std::string& table_name,
     spdlog::debug("addDataBlock select_query = {}", select_query);
     if (!rows.empty()) {
         std::string insert_query = buildInsertQuery(table_name, rows);
+        // spdlog::debug("addDataBlock insert_query = {}", insert_query);
         local_txn.exec(insert_query);
         local_txn.commit();
     }
@@ -780,7 +781,7 @@ std::string EdgeServer::buildInsertQuery(const std::string& table_name,
             if (rows[i][j].is_null())
                 query += "NULL";
             else
-                query += rows[i][j].c_str();
+                query += "\'" + pqxx::to_string(rows[i][j]) + "\'";
         }
         
         query += ")";
