@@ -3,7 +3,7 @@
 	url = git@github.com:wwow1/CRoaring.git
 [submodule "third_party/sql-parser"]
 	path = third_party/sql-parser
-	url = https://github.com/hyrise/sql-parser
+	url = https://github.com/wwow1/sql-parser
 [submodule "third_party/libpqxx"]
 	path = third_party/libpqxx
 	url = https://github.com/jtv/libpqxx.git
