@@ -14,7 +14,7 @@ docker stack deploy -c docker-stack.yml edge_cluster
 
 # 等待服务启动
 echo "Waiting for services to start..."
-sleep 45  # 增加到45秒以确保服务完全启动
+sleep 45
 
 # 配置网络延迟
-bash configure_network_delay.sh 
+#bash configure_network_delay.sh

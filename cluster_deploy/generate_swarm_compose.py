@@ -6,38 +6,21 @@ def generate_swarm_compose():
     services = {}
     networks = {}
     
-    # 创建overlay网络
-    networks["cluster_network"] = {
-        "driver": "overlay",
-        "attachable": True,
-        "ipam": {
-            "config": [{"subnet": cluster_config['overlay_network']['subnet']}]
+    # 检查是否使用现有网络
+    if cluster_config.get('use_existing_network', False):
+        networks["cluster_network"] = {
+            "external": True,
+            "name": cluster_config['existing_network_name']
         }
-    }
-    
-    # 配置中心节点
-    services["center"] = {
-        "image": get_image_name(),
-        "networks": {
-            "cluster_network": {
-                "ipv4_address": cluster_config['overlay_network']['center_ip']
+    else:
+        # 创建新的overlay网络
+        networks["cluster_network"] = {
+            "driver": "overlay",
+            "attachable": True,
+            "ipam": {
+                "config": [{"subnet": cluster_config['overlay_network']['subnet']}]
             }
-        },
-        "environment": [
-            f"POSTGRES_PASSWORD={cluster_config['postgres']['password']}",
-            f"POSTGRES_USER={cluster_config['postgres']['user']}",
-            f"POSTGRES_DB={cluster_config['postgres']['db']}",
-            "NODE_ID=0",  # 0表示中心节点
-            f"NUM_EDGES={num_nodes}"
-        ],
-        "cap_add": ["NET_ADMIN"],
-        "deploy": {
-            "placement": {
-                "constraints": [f"node.hostname=={get_manager_host()['name']}"]
-            },
-            "resources": cluster_config['resources']
         }
-    }
     
     # 配置边缘节点
     for i in range(num_nodes):
@@ -57,15 +40,19 @@ def generate_swarm_compose():
                 f"POSTGRES_DB={cluster_config['postgres']['db']}",
                 f"NODE_ID={i+1}",
                 f"CENTER_DELAY={cluster_config['network']['center_delay']}",
-                f"EDGE_DELAYS={','.join(str(delay) for delay in cluster_config['network']['edge_delays'][i])}"
+                f"EDGE_DELAYS={','.join(str(delay) for delay in cluster_config['network']['edge_delays'][i])}",
+                f"EDGE_IP={cluster_config['overlay_network']['edge_ip_prefix']}.{i+2}",  # 新增
+                "EDGE_PORT=50051"  # 新增
             ],
-            "cap_add": ["NET_ADMIN"], # 允许网络管理
+            "cap_add": ["NET_ADMIN"],
             "deploy": {
                 "placement": {
                     "constraints": [f"node.hostname=={host_name}"]
                 },
                 "resources": cluster_config['resources']
-            }
+            },
+            "volumes": ["/root/TRCEDS:/root/TRCEDS"],  # 新增
+            "command": "/root/TRCEDS/build/edge_server $EDGE_IP $EDGE_PORT /root/TRCEDS/config/config.json"  # 新增
         }
     
     # 配置客户端节点

@@ -1,9 +1,6 @@
 // test_client.cpp
 #include <iostream>
 #include "../include/client.h"
-
-// min 1704038400000
-// max 1704044400000
 #include <random>
 #include <vector>
 

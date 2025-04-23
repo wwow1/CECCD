@@ -603,7 +603,7 @@ uint64_t CenterServer::calculateTimeRange(const std::string& table_name, size_t 
     
     uint64_t time_difference = time_diff[1]["date_time"].as<uint64_t>() - 
                               time_diff[0]["date_time"].as<uint64_t>();
-    spdlog::info("time_difference: {} rows_per_block: {}", time_difference, rows_per_block);
+    //spdlog::info("time_difference: {} rows_per_block: {}", time_difference, rows_per_block);
     return time_difference * rows_per_block;
 }
 
@@ -645,7 +645,8 @@ void CenterServer::initializeSchema() {
             meta.time_range_ = time_range;
             updateSchema(table_name, meta);
             
-            spdlog::info("Updated schema for table {}, unique_id {}, start_time {}, time_range {}, avg_row_size {}, rows_per_block {}", table_name, unique_id, start_time, time_range, avg_row_size, rows_per_block);
+            // spdlog::info("Updated schema for table {}, unique_id {}, start_time {}, time_range {}, avg_row_size {}, rows_per_block {}", table_name, unique_id, start_time, time_range, avg_row_size, rows_per_block);
+            spdlog::info("Updated schema for table {}, unique_id {}", table_name, unique_id);
         }
         DBConnectionPool::getInstance().returnConnection(conn);
     } catch (const std::exception& e) {
@@ -798,7 +799,8 @@ grpc::Status CenterServer::ExecuteNetworkMeasurement(grpc::ServerContext* contex
 grpc::Status CenterServer::SubQuery(grpc::ServerContext* context,
                                 const cloud_edge_cache::QueryRequest* request,
                                 cloud_edge_cache::SubQueryResponse* response) {
-    std::cout << "Received SubQuery request: " << request->sql_query() << std::endl;
+    // std::cout << "Received SubQuery request to BlockId{} " << request->sql_query() << std::endl;
+    spdlog::info("Received SubQuery request to BlockId<{}:{}> ", request->stream_unique_id(), request->block_id());
     auto conn = DBConnectionPool::getInstance().getConnection();
     try {
         pqxx::work txn(*conn);

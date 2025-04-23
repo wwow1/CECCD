@@ -34,6 +34,12 @@ cluster_config = {
             "role": "manager"  # manager或worker
         },
         {
+            "name": "ca68",
+            "ip": "192.168.6.68",
+            "ssh_user": "root",
+            "role": "worker"
+        },
+        {
             "name": "ca96",
             "ip": "192.168.6.96",
             "ssh_user": "root",
@@ -58,7 +64,9 @@ cluster_config = {
     "overlay_network": {
         "subnet": "172.20.0.0/16",
         "center_ip": "172.20.0.2",
-        "edge_ip_prefix": "172.20.1"
+        "edge_ip_prefix": "172.20.1",
+        'use_existing_network': True,  # 设置为True表示使用现有网络
+        'existing_network_name': 'your_existing_network_name',  # 现有网络名称
     }
 }
 
@@ -96,4 +104,4 @@ def validate_config():
         raise ValueError("Must have exactly one manager node")
 
 # 在导入时验证配置
-validate_config() 
+validate_config()
