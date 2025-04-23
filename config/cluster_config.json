@@ -1,14 +1,14 @@
 {
     "cluster": {
         "center_node": {
-            "address": "172.18.0.2:54320"
+            "address": "172.20.0.2:54320"
         },
         "block_size_mb": 1,
         "edge_capacity_gb": 2.0,
         "bloom_filter_fpr": 0.01,
         "index_latency_threshold_ms": 20,
-        "statistics_report_interval_s": 10,
-        "prediction_period_s": 60,
+        "statistics_report_interval_s": 5,
+        "prediction_period_s": 30,
         "log_file_path": "/tmp/server.log",
         "edge_log_level": "debug",
         "center_log_level": "debug"
