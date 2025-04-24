@@ -66,7 +66,7 @@ cluster_config = {
         "center_ip": "172.20.0.2",
         "edge_ip_prefix": "172.20.1",
         'use_existing_network': True,  # 设置为True表示使用现有网络
-        'existing_network_name': 'your_existing_network_name',  # 现有网络名称
+        'existing_network_name': 'cluster_network',  # 现有网络名称
     }
 }
 
