@@ -32,6 +32,7 @@ services:
   edge1:
     cap_add:
     - NET_ADMIN
+    command: /root/TRCEDS/build/edge_server 50051 /root/TRCEDS/config/cluster_config.json
     deploy:
       endpoint_mode: dnsrr
       placement:
@@ -58,6 +59,7 @@ services:
   edge2:
     cap_add:
     - NET_ADMIN
+    command: /root/TRCEDS/build/edge_server 50051 /root/TRCEDS/config/cluster_config.json
     deploy:
       endpoint_mode: dnsrr
       placement:
@@ -84,6 +86,7 @@ services:
   edge3:
     cap_add:
     - NET_ADMIN
+    command: /root/TRCEDS/build/edge_server 50051 /root/TRCEDS/config/cluster_config.json
     deploy:
       endpoint_mode: dnsrr
       placement:
@@ -110,6 +113,7 @@ services:
   edge4:
     cap_add:
     - NET_ADMIN
+    command: /root/TRCEDS/build/edge_server 50051 /root/TRCEDS/config/cluster_config.json
     deploy:
       endpoint_mode: dnsrr
       placement:

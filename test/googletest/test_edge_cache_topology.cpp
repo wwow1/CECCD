@@ -174,15 +174,15 @@ protected:
     uint32_t max_cache_block_num = 2048;
     uint32_t max_store_block_num = 150;
     int time_range[4] = {1, 3, 5, 7};
-    uint32_t centarl_edge_node_access_frequency = 10000;     // 中心节点的基准访问频次
+    uint32_t centarl_edge_node_access_frequency = 50000;     // 中心节点的基准访问频次
     double edge_node_decay_factor = 0.4;             // 边缘节点的访问频次衰减因子（相对于中心节点）
     
-    bool split_stream = false;
+    bool split_stream = true;
     int index_constran_lat = 3;
     int topu_radius = 5;
     uint32_t max_stream_num = 1400;
     ZipfDistribution prepare_block_zipf{max_store_block_num, 1.6};  // 块访问的 Zipf 分布
-    ZipfDistribution test_block_zipf{max_store_block_num, 1.6};
+    ZipfDistribution test_block_zipf{max_store_block_num, 0.2};
     
     // 添加生成用户延迟的方法
     double generateUserLatency() {

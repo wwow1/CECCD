@@ -2,8 +2,12 @@
 import matplotlib.pyplot as plt
 import numpy as np
 plt.rcParams.update({
-    'font.sans-serif': 'Noto Sans CJK JP',  # 更通用的中文字体
-    'axes.unicode_minus': False            # 显示负号
+    'font.sans-serif': 'Noto Sans CJK JP',
+    'axes.unicode_minus': False,
+    'legend.fontsize': 16,       # 图例字体大小
+    'axes.labelsize': 16,       # 坐标轴标签字体大小
+    'xtick.labelsize': 16,      # X轴刻度字体大小
+    'ytick.labelsize': 16       # Y轴刻度字体大小
 })
 # 数据
 network_sizes = ['1.0', '0.8', '0.6', '0.4', '0.2']
@@ -41,13 +45,13 @@ plt.plot(network_sizes, hashmap_p99_times, '-^', color='#87CEFA', linewidth=2, m
 #                 va='bottom')
 
 # 设置P99时间图的标题和标签
-plt.xlabel('Zipfian分布参数', fontsize=12)
-plt.ylabel('P99数据检索延时 (ms)', fontsize=12)
-plt.legend(loc='upper left', fontsize=10)
+plt.xlabel('Zipfian分布参数', fontsize=16)
+plt.ylabel('P99数据检索延时 (ms)', fontsize=16)
+plt.legend(loc='upper left', fontsize=16)
 plt.grid(True, linestyle='--', alpha=0.7)
 plt.ylim(0, max(hcbf_p99_times) * 1.2)
 
 # 优化布局并保存P99时间图
 plt.tight_layout()
-plt.savefig('p99_lookup_times.png', dpi=300, bbox_inches='tight')
+plt.savefig('p99_lookup_times.png', dpi=500, bbox_inches='tight')
 plt.close() 

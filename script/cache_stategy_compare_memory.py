@@ -3,8 +3,12 @@ import matplotlib.pyplot as plt
 
 cap_params = [512, 1024, 1536, 2048, 2560, 3072, 3584, 4096]
 plt.rcParams.update({
-    'font.sans-serif': 'Noto Sans CJK JP',  # 更通用的中文字体
-    'axes.unicode_minus': False            # 显示负号
+    'font.sans-serif': 'Noto Sans CJK JP',
+    'axes.unicode_minus': False,
+    'legend.fontsize': 16,       # 图例字体大小
+    'axes.labelsize': 16,       # 坐标轴标签大小
+    'xtick.labelsize': 16,      # X轴刻度大小
+    'ytick.labelsize': 16       # Y轴刻度大小
 })
 # 假设的测试结果数据
 # 这里的数据需要根据你的实际测试结果进行替换
@@ -22,47 +26,43 @@ index = np.arange(len(cap_params))  # 创建索引
 bar_width = 0.35  # 设置条形宽度
 
 # 绘制缓存命中率折线图
-plt.figure(figsize=(10, 5))  # 新建图形
-axs = plt.gca()  # 获取当前坐标轴
+plt.figure(figsize=(10, 5))
+axs = plt.gca()
 axs.plot(cap_params, lecs_cache_hit_rate, label='LECS', marker='^')
 axs.plot(cap_params, trecs_cache_hit_rate, label='TRECS', marker='o')
-axs.set_xlabel('边缘服务器的缓存容量')
-axs.set_ylabel('缓存命中率 (%)')
-axs.set_xticks(cap_params)  # 设置横坐标刻度为 cap_params
-axs.set_xticklabels(cap_params)  # 设置横坐标标签为 cap_params
-axs.legend()
+axs.set_xlabel('边缘服务器的缓存容量', fontsize=16)
+axs.set_ylabel('缓存命中率 (%)', fontsize=16)
+axs.set_xticks(cap_params)
+axs.set_xticklabels(cap_params, fontsize=16)
+axs.legend(fontsize=16)
 axs.grid()
-plt.savefig('cache_hit_rate_comparison.png', dpi=300, bbox_inches='tight')  # 保存图形
-plt.show()  # 显示图形
+plt.savefig('cache_hit_rate_comparison.png', dpi=500, bbox_inches='tight')
+plt.show()
 
 # 绘制总流量条形图
-plt.figure(figsize=(10, 5))  # 新建图形
-axs = plt.gca()  # 获取当前坐标轴
+plt.figure(figsize=(10, 5))
+axs = plt.gca()
 axs.bar(index, lecs_total_traffic, bar_width, label='LECS')
-axs.bar(index + bar_width, trecs_total_traffic, bar_width, label='TRECS',hatch='///')
-axs.set_xlabel('边缘服务器的缓存容量')
-axs.set_ylabel('边缘协同网络总流量 (GB)')
+axs.bar(index + bar_width, trecs_total_traffic, bar_width, label='TRECS', hatch='///')
+axs.set_xlabel('边缘服务器的缓存容量', fontsize=16)
+axs.set_ylabel('边缘协同网络总流量 (GB)', fontsize=16)
 axs.set_xticks(index + bar_width / 2)
-axs.set_xticklabels(cap_params)
-axs.legend()
+axs.set_xticklabels(cap_params, fontsize=16)
+axs.legend(fontsize=16)
 axs.grid()
-plt.savefig('total_network_traffic_comparison.png', dpi=300, bbox_inches='tight')  # 保存图形
-plt.show()  # 显示图形
+plt.savefig('total_network_traffic_comparison.png', dpi=500, bbox_inches='tight')
+plt.show()
 
 # 绘制总查询时间条形图
-plt.figure(figsize=(10, 5))  # 新建图形
-axs = plt.gca()  # 获取当前坐标轴
+plt.figure(figsize=(10, 5))
+axs = plt.gca()
 axs.plot(cap_params, lecs_total_query_time, label='LECS', marker='^')
 axs.plot(cap_params, trecs_total_query_time, label='TRECS', marker='o')
-# axs.bar(index, lecs_total_query_time, bar_width, label='LECS')
-# axs.bar(index + bar_width, trecs_total_query_time, bar_width, label='TRECS')
-axs.set_xlabel('边缘服务器的缓存容量')
-axs.set_ylabel('总查询时间 (s)')
-axs.set_xticks(cap_params)  # 设置横坐标刻度为 cap_params
-axs.set_xticklabels(cap_params)  # 设置横坐标标签为 cap_params
-axs.legend()
+axs.set_xlabel('边缘服务器的缓存容量', fontsize=16)
+axs.set_ylabel('总查询时间 (s)', fontsize=16)
+axs.set_xticks(cap_params)
+axs.set_xticklabels(cap_params, fontsize=16)
+axs.legend(fontsize=16)
 axs.grid()
-plt.savefig('total_query_time_comparison.png', dpi=300, bbox_inches='tight')  # 保存图形
-plt.show()  # 显示图形
-
-# ... existing code ...
+plt.savefig('total_query_time_comparison.png', dpi=500, bbox_inches='tight')
+plt.show()

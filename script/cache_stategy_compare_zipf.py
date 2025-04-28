@@ -3,8 +3,12 @@ import matplotlib.pyplot as plt
 
 zipfian_params = ['0.2', '0.4', '0.6', '0.8', '1.0', '1.2', '1.4', '1.6']
 plt.rcParams.update({
-    'font.sans-serif': 'Noto Sans CJK JP',  # 更通用的中文字体
-    'axes.unicode_minus': False            # 显示负号
+    'font.sans-serif': 'Noto Sans CJK JP',
+    'axes.unicode_minus': False,
+    'legend.fontsize': 16,       # 图例字体大小
+    'axes.labelsize': 16,       # 坐标轴标签大小
+    'xtick.labelsize': 16,      # X轴刻度大小
+    'ytick.labelsize': 16       # Y轴刻度大小
 })
 # 假设的测试结果数据
 # 这里的数据需要根据你的实际测试结果进行替换
@@ -26,41 +30,37 @@ plt.figure(figsize=(10, 5))  # 新建图形
 axs = plt.gca()  # 获取当前坐标轴
 axs.plot(zipfian_params, lecs_cache_hit_rate, label='LECS', marker='^')
 axs.plot(zipfian_params, trecs_cache_hit_rate, label='TRECS', marker='o')
-axs.set_xlabel('Zipfian分布参数')
-axs.set_ylabel('缓存命中率 (%)')
-axs.legend()
+axs.set_xlabel('Zipfian分布参数', fontsize=16)
+axs.set_ylabel('缓存命中率 (%)', fontsize=16)
+axs.legend(fontsize=16)
 axs.grid()
-plt.savefig('cache_hit_rate_comparison.png', dpi=300, bbox_inches='tight')  # 保存图形
+plt.savefig('cache_hit_rate_comparison.png', dpi=500, bbox_inches='tight')  # 保存图形
 plt.show()  # 显示图形
 
 # 绘制总流量条形图
-plt.figure(figsize=(10, 5))  # 新建图形
-axs = plt.gca()  # 获取当前坐标轴
+plt.figure(figsize=(10, 5))
+axs = plt.gca()
 axs.bar(index, lecs_total_traffic, bar_width, label='LECS')
 axs.bar(index + bar_width, trecs_total_traffic, bar_width, label='TRECS',hatch='///')
-axs.set_xlabel('Zipfian分布参数')
-axs.set_ylabel('边缘协同网络总流量 (GB)')
-axs.set_xticks(index + bar_width / 2)
-axs.set_xticklabels(zipfian_params)
-axs.legend()
+axs.set_xlabel('Zipfian分布参数', fontsize=16)
+axs.set_ylabel('边缘协同网络总流量 (GB)', fontsize=16)
+axs.set_xticks(index + bar_width / 2)  # Removed fontsize from here
+axs.set_xticklabels(zipfian_params, fontsize=16)  # Kept fontsize here
+axs.legend(fontsize=16)
 axs.grid()
-plt.savefig('total_network_traffic_comparison.png', dpi=300, bbox_inches='tight')  # 保存图形
+plt.savefig('total_network_traffic_comparison.png', dpi=500, bbox_inches='tight')  # 保存图形
 plt.show()  # 显示图形
 
 # 绘制总查询时间条形图
-plt.figure(figsize=(10, 5))  # 新建图形
-axs = plt.gca()  # 获取当前坐标轴
+plt.figure(figsize=(10, 5))
+axs = plt.gca()
 axs.plot(zipfian_params, lecs_total_query_time, label='LECS', marker='^')
 axs.plot(zipfian_params, trecs_total_query_time, label='TRECS', marker='o')
-# axs.bar(index, lecs_total_query_time, bar_width, label='LECS')
-# axs.bar(index + bar_width, trecs_total_query_time, bar_width, label='TRECS')
-axs.set_xlabel('Zipfian分布参数')
-axs.set_ylabel('总查询时间 (s)')
-axs.set_xticks(index + bar_width / 2)
-axs.set_xticklabels(zipfian_params)
-axs.legend()
+axs.set_xlabel('Zipfian分布参数', fontsize=16)
+axs.set_ylabel('总查询时间 (s)', fontsize=16)
+axs.set_xticks(index + bar_width / 2)  # Removed fontsize from here
+axs.set_xticklabels(zipfian_params, fontsize=16)  # Kept fontsize here
+axs.legend(fontsize=16)
 axs.grid()
-plt.savefig('total_query_time_comparison.png', dpi=300, bbox_inches='tight')  # 保存图形
+plt.savefig('total_query_time_comparison.png', dpi=500, bbox_inches='tight')  # 保存图形
 plt.show()  # 显示图形
-
-# ... existing code ...

@@ -148,13 +148,13 @@ protected:
     std::unordered_map<std::string, std::unique_ptr<EdgeCacheIndex>> edge_indices;
     std::vector<std::string> edge_nodes;
     std::string center_node;
-    int topu_radius = 5;
+    int topu_radius = 8;
     int hops_lat = 4;
     int index_constran_lat = 3;
     int center_lat = 10;
     uint32_t block_size_ = 512; // KB
     uint32_t max_store_block_num = 150;
-    uint32_t max_stream_num = 1400;
+    uint32_t max_stream_num = 3584;
     uint32_t centarl_edge_node_access_frequency = 100000;     // 中心节点的基准访问频次
     double edge_node_decay_factor = 0.4;             // 边缘节点的访问频次衰减因子（相对于中心节点）
     double network_bandwidth = 100; // 100Mbps
@@ -165,9 +165,9 @@ protected:
     int time_range[4] = {1, 3, 5, 7};
     double selectivity_range[6] = {0.01, 0.1, 0.1, 0.2, 0.9, 0.9};
 
-    bool split_stream = false;
-    uint32_t max_cache_block_num = 4096;
-    CacheStrategy cache_strategy_type = CacheStrategy::TRECS;
+    bool split_stream = true;
+    uint32_t max_cache_block_num = 2048;
+    CacheStrategy cache_strategy_type = CacheStrategy::LECS;
     ZipfDistribution prepare_block_zipf{max_store_block_num, 0.6};  // 块访问的 Zipf 分布
     ZipfDistribution test_block_zipf{max_store_block_num, 0.6};
 

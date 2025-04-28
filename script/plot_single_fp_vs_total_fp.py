@@ -9,8 +9,12 @@ import matplotlib.font_manager as fm
 #     print(font)
 
 plt.rcParams.update({
-    'font.sans-serif': 'Noto Sans CJK JP',  # 更通用的中文字体
-    'axes.unicode_minus': False            # 显示负号
+    'font.sans-serif': 'Noto Sans CJK JP',
+    'axes.unicode_minus': False,
+    'legend.fontsize': 16,       # 图例字体大小
+    'axes.labelsize': 16,       # 坐标轴标签大小
+    'xtick.labelsize': 16,      # X轴刻度大小
+    'ytick.labelsize': 16       # Y轴刻度大小
 })
 
 # motivation
@@ -48,8 +52,10 @@ for i, rate in enumerate(false_positive_rates_trindex):
                 va='bottom')
 
 # 设置标题和标签
-plt.xlabel('单个计数布隆过滤器的预期假阳性率参数', fontsize=12)
-plt.ylabel('边缘数据索引的假阳性率 (%)', fontsize=12)
+# 修改图表标签设置
+plt.xlabel('单个计数布隆过滤器的预期假阳性率参数', fontsize=16)
+plt.ylabel('边缘数据索引的假阳性率 (%)', fontsize=16)
+plt.legend(fontsize=16)  # 修改图例字体大小
 
 # 设置网格
 plt.grid(True, linestyle='--', alpha=0.7)
@@ -64,6 +70,6 @@ plt.legend()
 plt.tight_layout()
 
 # 保存图片
-plt.savefig('false_positive_rates.png', dpi=300, bbox_inches='tight')
+plt.savefig('false_positive_rates.png', dpi=500, bbox_inches='tight')
 plt.close()
 
