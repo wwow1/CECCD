@@ -41,7 +41,7 @@ public:
     int64_t getIndexLatencyThresholdMs() const { return index_latency_threshold_ms_; }
     int64_t getStatisticsReportInterval() const { return statistics_report_interval_s_; }
     int64_t getPredictionPeriod() const { return prediction_period_s_; }
-    size_t getBlockSizeMB() const { return block_size_mb_; }
+    double getBlockSizeMB() const { return block_size_mb_; }
     const std::string& getLogFilePath() const { return log_file_path_; }
     const std::string& getEdgeLogLevel() const { return edge_log_level_; }
     const std::string& getCenterLogLevel() const { return center_log_level_; }
@@ -68,7 +68,7 @@ private:
     int64_t index_latency_threshold_ms_;
     int64_t statistics_report_interval_s_;
     int64_t prediction_period_s_;
-    size_t block_size_mb_;
+    double block_size_mb_;
     double edge_capacity_gb_;
     double bloom_filter_fpr_;
     std::string log_file_path_;

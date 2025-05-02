@@ -29,7 +29,7 @@ void ConfigManager::loadConfig(const std::string& config_path) {
     prediction_period_s_ = j["cluster"]["prediction_period_s"].get<int64_t>();
 
     // Load block size
-    block_size_mb_ = j["cluster"]["block_size_mb"].get<size_t>();
+    block_size_mb_ = j["cluster"]["block_size_mb"].get<double>();
     
     // Load edge capacity
     edge_capacity_gb_ = j["cluster"]["edge_capacity_gb"].get<double>();
