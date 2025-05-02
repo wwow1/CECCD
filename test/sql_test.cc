@@ -75,7 +75,7 @@ std::string generateRandomQuery(int64_t min_time, int64_t max_time, int64_t time
     
     int table_id = 0;
     // 10%概率查询本分区，90%概率查询其他分区
-    std::bernoulli_distribution local_choice(0.10); // 修改概率为10%
+    std::bernoulli_distribution local_choice(0.90); // 修改概率为10%
     if (local_choice(gen)) {
         // 从本分区随机选择
         std::uniform_int_distribution<uint64_t> local_dist(local_min, local_max);
@@ -206,8 +206,8 @@ std::string generateRandomQuery(int64_t min_time, int64_t max_time, int64_t time
 
 // 修改 main 函数以使用生成的随机查询
 int main(int argc, char* argv[]) {
-    if (argc != 8) {
-        std::cerr << "Usage: " << argv[0] << " <center_server_ip> <center_server_port> <min_time> <max_time> <time_unit> <zipf_alpha> <wait_seconds>" << std::endl;
+    if (argc != 9) {
+        std::cerr << "Usage: " << argv[0] << " <center_server_ip> <center_server_port> <min_time> <max_time> <time_unit> <zipf_alpha> <period_seconds> <max_table_id>" << std::endl;
         return 1;
     }
 
@@ -220,6 +220,8 @@ int main(int argc, char* argv[]) {
     int64_t max_time = std::stoll(argv[4]);
     int64_t time_unit = std::stoll(argv[5]);
     double zipf_alpha = std::stod(argv[6]);
+    int period_seconds = std::stoi(argv[7]);
+    int max_table_id = std::stoi(argv[7]);
 
     // 1. 获取所有edge节点信息
     auto edge_nodes = client.GetEdgeNodes();
@@ -232,8 +234,8 @@ int main(int argc, char* argv[]) {
     std::cout << "Found " << edge_nodes.size() << " edge nodes" << std::endl;
 
     // 2. Warm-up period (30 seconds)
-    const int warmup_duration = 30;
-    std::cout << "\n=== Starting warm-up period (30 seconds) ===" << std::endl;
+    const int warmup_duration = period_seconds * 2;
+    std::cout << "\n=== Starting warm-up period (" << warmup_duration << " seconds) ===" << std::endl;
     auto warmup_start = std::chrono::steady_clock::now();
     while (std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - warmup_start).count() < warmup_duration) {
@@ -246,7 +248,7 @@ int main(int argc, char* argv[]) {
                     node_client.BindToEdgeServer(edge_nodes[i]);
                     std::string query = generateRandomQuery(
                         min_time, max_time, time_unit,
-                        edge_nodes.size(),
+                        max_table_id,
                         i,
                         zipf_alpha
                     );
@@ -261,15 +263,13 @@ int main(int argc, char* argv[]) {
         }
     }
     std::cout << "=== Warm-up period completed ===" << std::endl;
-
     // 3. Waiting period
-    int wait_seconds = std::stoi(argv[7]);
-    std::cout << "\n=== Starting waiting period (" << wait_seconds << " seconds) ===" << std::endl;
-    std::this_thread::sleep_for(std::chrono::seconds(wait_seconds));
+    std::cout << "\n=== Starting waiting period (" << period_seconds << " seconds) ===" << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(period_seconds));
     std::cout << "=== Waiting period completed ===" << std::endl;
 
     // 4. Execution period
-    const int execution_queries = 100;
+    const int execution_queries = 1000;
     std::cout << "\n=== Starting execution period (" << execution_queries << " queries per node) ===" << std::endl;
     
     std::atomic<int64_t> total_latency_ms{0};
@@ -285,7 +285,7 @@ int main(int argc, char* argv[]) {
                     
                     std::string query = generateRandomQuery(
                         min_time, max_time, time_unit,
-                        edge_nodes.size(),
+                        max_table_id,
                         node_idx,
                         zipf_alpha
                     );

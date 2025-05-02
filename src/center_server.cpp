@@ -92,8 +92,8 @@ void CenterServer::initializeNetworkMetrics() {
             network_metrics_[from_node][to_node] = metrics;
             network_metrics_[to_node][from_node] = metrics;
             
-            spdlog::debug("Final network metrics from {} to {}: Average bandwidth: {} MB/s, Average latency: {} ms", 
-                         from_node, to_node, metrics.bandwidth, metrics.latency * 1000);
+            // spdlog::debug("Final network metrics from {} to {}: Average bandwidth: {} MB/s, Average latency: {} ms", 
+            //              from_node, to_node, metrics.bandwidth, metrics.latency * 1000);
         }
     }
     
@@ -115,7 +115,7 @@ grpc::Status CenterServer::ReportStatistics(grpc::ServerContext* context,
         stats[server_address].first++;
         stats[server_address].second += block_stat.selectivity();
         
-        spdlog::debug("Updated stats for block {} from {} (selectivity={})", key, server_address, block_stat.selectivity());
+        spdlog::debug("Updated stats for block {} from {})", key, server_address);
     }
     
     return grpc::Status::OK;
@@ -347,7 +347,8 @@ void CenterServer::CacheReplacementQueue::buildPriorityQueue() {
     auto temp_queue = priority_queue_;
     while (!temp_queue.empty()) {
         auto [qccv, block_key, node] = temp_queue.top();
-        spdlog::debug("QCCV: {}, Block: {}, Node: {}", qccv, block_key, node);
+        // spdlog::debug("QCCV: {}, Block: {}, Node: {}", qccv, block_key, node);
+        spdlog::debug("Block: {}, Node: {}", block_key, node);
         temp_queue.pop();
     }
 }
@@ -362,7 +363,7 @@ CenterServer::CacheReplacementQueue::getTopPlacementChoice() {
     auto [qccv, block_key, node] = priority_queue_.top();
     priority_queue_.pop();
     
-    spdlog::debug("Getting top placement choice: Block {} -> Node {} (QCCV: {})", block_key, node, qccv);
+    spdlog::debug("Getting top placement choice: Block {} -> Node {}", block_key, node);
     
     // 使用 accessor 来访问 block_candidates_
     tbb::concurrent_hash_map<std::string, std::vector<std::pair<std::string, double>>>::accessor accessor;
@@ -375,7 +376,7 @@ CenterServer::CacheReplacementQueue::getTopPlacementChoice() {
             ),
             candidates.end()
         );
-        spdlog::debug("Removed candidate for block {}, (candidates before: {}, after: {})", block_key, before_size, candidates.size());
+        // spdlog::debug("Removed candidate for block {}, (candidates before: {}, after: {})", block_key, before_size, candidates.size());
     }
     
     return std::make_pair(block_key, node);
@@ -558,6 +559,7 @@ void CenterServer::executeNodeCacheUpdate(
         block_op->set_operation(cloud_edge_cache::BlockOperation::ADD);
         
         affected_streams.insert(stream_id);
+        spdlog::debug("executeNodeCacheUpdate:add block {} to node {}", block_key, edge_server_address);
         // std::cout << "executeNodeCacheUpdate:add block " << block_key << " to node " << edge_server_address << std::endl;
     }
     
@@ -573,6 +575,7 @@ void CenterServer::executeNodeCacheUpdate(
         block_op->set_datastream_unique_id(stream_id);
         block_op->set_block_id(block_id);
         block_op->set_operation(cloud_edge_cache::BlockOperation::REMOVE);
+        spdlog::debug("executeNodeCacheUpdate:remove block {} from node {}", block_key, edge_server_address);
         // std::cout << "executeNodeCacheUpdate:remove block " << block_key << " from node " << edge_server_address << std::endl;
     }
 
