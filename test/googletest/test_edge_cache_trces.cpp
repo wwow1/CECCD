@@ -148,13 +148,13 @@ protected:
     std::unordered_map<std::string, std::unique_ptr<EdgeCacheIndex>> edge_indices;
     std::vector<std::string> edge_nodes;
     std::string center_node;
-    int topu_radius = 8;
+    int topu_radius = 7;
     int hops_lat = 4;
     int index_constran_lat = 3;
     int center_lat = 10;
     uint32_t block_size_ = 512; // KB
     uint32_t max_store_block_num = 150;
-    uint32_t max_stream_num = 3584;
+    uint32_t max_stream_num = 2744;
     uint32_t centarl_edge_node_access_frequency = 100000;     // 中心节点的基准访问频次
     double edge_node_decay_factor = 0.4;             // 边缘节点的访问频次衰减因子（相对于中心节点）
     double network_bandwidth = 100; // 100Mbps

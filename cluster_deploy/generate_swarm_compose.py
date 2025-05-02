@@ -2,7 +2,7 @@ import yaml
 from config import cluster_config, get_image_name, get_manager_host
 
 def generate_swarm_compose():
-    num_nodes = len(cluster_config['network']['edge_delays'])
+    num_nodes = cluster_config[num_nodes]
     services = {}
     networks = {}
     
@@ -53,7 +53,7 @@ def generate_swarm_compose():
                 "resources": cluster_config['resources'],
                 "endpoint_mode": "dnsrr"  # 禁用VIP模式
             },
-            "volumes": ["/root/TRCEDS:/root/TRCEDS"],  # 新增
+            "volumes": ["/home/zfy/TRCEDS:/root/TRCEDS"],  # 新增
             "command": f"/root/TRCEDS/build/edge_server 50051 /root/TRCEDS/config/cluster_config.json"  # 直接填入IP和端口
         }
     

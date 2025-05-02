@@ -31,22 +31,46 @@ cluster_config = {
             "name": "ca66",
             "ip": "192.168.6.66",
             "ssh_user": "root",
-            "role": "manager"  # manager或worker
+            "role": "manager"
         },
         {
             "name": "ca68",
             "ip": "192.168.6.68",
             "ssh_user": "root",
-            "role": "worker"
+            "role": "worker"  
+        },
+        {
+            "name": "ca95",
+            "ip": "192.168.6.95",
+            "ssh_user": "zfy",
+            "role": "worker"  # manager或worker
         },
         {
             "name": "ca96",
             "ip": "192.168.6.96",
             "ssh_user": "root",
             "role": "worker"
+        },
+        {
+            "name": "ca42",
+            "ip": "192.168.6.42",
+            "ssh_user": "zfy",
+            "role": "worker"
+        },
+        {
+            "name": "ca56",
+            "ip": "192.168.6.56",
+            "ssh_user": "zfy",
+            "role": "worker"
+        },
+        {
+            "name": "ca62",
+            "ip": "192.168.6.62",
+            "ssh_user": "zfy",
+            "role": "worker"
         }
     ],
-    
+    "num_nodes": 25,
     # 网络延迟配置（单位：毫秒）
     "network": {
         # 边缘节点之间的延迟矩阵

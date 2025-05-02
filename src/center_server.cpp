@@ -412,6 +412,9 @@ void CenterServer::Start(const std::string& server_address) {
     grpc::ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
     
+    // 注册所有服务时添加新服务
+    builder.RegisterService(static_cast<cloud_edge_cache::ClientToCenter::Service*>(this));
+    
     // 注册所有服务
     builder.RegisterService(static_cast<cloud_edge_cache::EdgeToCenter::Service*>(this));
     builder.RegisterService(static_cast<cloud_edge_cache::CenterToEdge::Service*>(this));
@@ -843,4 +846,14 @@ grpc::Status CenterServer::SubQuery(grpc::ServerContext* context,
         DBConnectionPool::getInstance().returnConnection(conn);
         return grpc::Status(grpc::StatusCode::INTERNAL, e.what());
     }
+}
+// 在CenterServer类中添加新方法实现
+grpc::Status CenterServer::GetEdgeNodes(grpc::ServerContext* context,
+                                      const cloud_edge_cache::Empty* request,
+                                      cloud_edge_cache::EdgeNodesInfo* response) {
+    std::lock_guard<std::mutex> lock(nodes_mutex_);
+    for (const auto& node : edge_server_addresses_) {
+        response->add_edge_nodes(node);
+    }
+    return grpc::Status::OK;
 }

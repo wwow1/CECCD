@@ -181,8 +181,8 @@ protected:
     int index_constran_lat = 3;
     int topu_radius = 5;
     uint32_t max_stream_num = 1400;
-    ZipfDistribution prepare_block_zipf{max_store_block_num, 1.6};  // 块访问的 Zipf 分布
-    ZipfDistribution test_block_zipf{max_store_block_num, 0.2};
+    ZipfDistribution prepare_block_zipf{max_store_block_num, 0.4};  // 块访问的 Zipf 分布
+    ZipfDistribution test_block_zipf{max_store_block_num, 1.6};
     
     // 添加生成用户延迟的方法
     double generateUserLatency() {

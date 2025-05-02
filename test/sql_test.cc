@@ -3,8 +3,9 @@
 #include "../include/client.h"
 #include <random>
 #include <vector>
+#include <thread>  // 添加这个头文件
 
-int edge_server_number = 25;
+int edge_server_number = 0;
 int durations[4] = {1, 4, 7, 10};
     // 添加 Zipf 分布生成器类
 class ZipfDistribution {
@@ -205,38 +206,109 @@ std::string generateRandomQuery(int64_t min_time, int64_t max_time, int64_t time
 
 // 修改 main 函数以使用生成的随机查询
 int main(int argc, char* argv[]) {
-    // 检查参数数量
-    if (argc != 10) { // 修改为10个参数
-        std::cerr << "Usage: " << argv[0] << " <server_address> <port> <min_time> <max_time> <time_unit> <max_table_id> <edge_server_id> <edge_server_number> <zipf_alpha>" << std::endl;
+    if (argc != 8) {
+        std::cerr << "Usage: " << argv[0] << " <center_server_ip> <center_server_port> <min_time> <max_time> <time_unit> <zipf_alpha> <wait_seconds>" << std::endl;
         return 1;
     }
 
-    // 创建 Client 实例，连接到服务器
-    std::string server_address = std::string(argv[1]) + ":" + argv[2];
-    std::cout << " server_address " << server_address << std::endl;
-    Client client(server_address);
+    // Create Client instance - connects only to center server
+    std::string center_server_address = std::string(argv[1]) + ":" + argv[2];
+    Client client(center_server_address);
 
-    // 获取参数 - 按照新的参数顺序解析
+    // Get parameters
     int64_t min_time = std::stoll(argv[3]);
     int64_t max_time = std::stoll(argv[4]);
-    int64_t time_unit = std::stoll(argv[5]);      // 第5个参数是time_unit
-    uint64_t max_table_id = std::stoull(argv[6]); // 第6个参数是max_table_id
-    uint64_t edge_server_id = std::stoull(argv[7]); // 第7个参数是edge_server_id
-    edge_server_number = std::stoi(argv[8]);      // 第8个参数是edge_server_number
-    double zipf_alpha = std::stod(argv[9]);       // 第9个参数是zipf_alpha
+    int64_t time_unit = std::stoll(argv[5]);
+    double zipf_alpha = std::stod(argv[6]);
 
-    // 生成随机查询语句
-    std::string random_query = generateRandomQuery(min_time, max_time, time_unit, max_table_id, edge_server_id, zipf_alpha);
+    // 1. 获取所有edge节点信息
+    auto edge_nodes = client.GetEdgeNodes();
+    if (edge_nodes.empty()) {
+        std::cerr << "Error: No edge nodes available" << std::endl;
+        return 1;
+    }
+    edge_server_number = edge_nodes.size(); // 动态设置edge_server_number
 
-    // 执行随机查询并打印结果
-    std::cout << "Executing Random Query: " << random_query << std::endl;
-    std::string result = client.Query(random_query); // 检查 Query 方法是否有问题
-    // // 简单示例：逐行处理结果
-    // std::istringstream iss(result);
-    // std::string line;
-    // while (std::getline(iss, line)) {
-    //     // 这里可以添加更复杂的解析逻辑
-    //     std::cout << "Parsed line: " << line << std::endl;
-    // }
+    std::cout << "Found " << edge_nodes.size() << " edge nodes" << std::endl;
+
+    // 2. Warm-up period (30 seconds)
+    const int warmup_duration = 30;
+    std::cout << "\n=== Starting warm-up period (30 seconds) ===" << std::endl;
+    auto warmup_start = std::chrono::steady_clock::now();
+    while (std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - warmup_start).count() < warmup_duration) {
+        
+        std::vector<std::thread> warmup_threads;
+        for (size_t i = 0; i < edge_nodes.size(); ++i) {
+            warmup_threads.emplace_back([&, i]() {
+                try {
+                    Client node_client(center_server_address);
+                    node_client.BindToEdgeServer(edge_nodes[i]);
+                    std::string query = generateRandomQuery(
+                        min_time, max_time, time_unit,
+                        edge_nodes.size(),
+                        i,
+                        zipf_alpha
+                    );
+                    node_client.Query(query);
+                } catch (...) {
+                    // Ignore warm-up errors
+                }
+            });
+        }
+        for (auto& t : warmup_threads) {
+            t.join();
+        }
+    }
+    std::cout << "=== Warm-up period completed ===" << std::endl;
+
+    // 3. Waiting period
+    int wait_seconds = std::stoi(argv[7]);
+    std::cout << "\n=== Starting waiting period (" << wait_seconds << " seconds) ===" << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(wait_seconds));
+    std::cout << "=== Waiting period completed ===" << std::endl;
+
+    // 4. Execution period
+    const int execution_queries = 100;
+    std::cout << "\n=== Starting execution period (" << execution_queries << " queries per node) ===" << std::endl;
+    
+    std::atomic<int64_t> total_latency_ms{0};
+    std::vector<std::thread> execution_threads;
+    
+    for (size_t node_idx = 0; node_idx < edge_nodes.size(); ++node_idx) {
+        execution_threads.emplace_back([&, node_idx]() {
+            try {
+                Client node_client(center_server_address);
+                node_client.BindToEdgeServer(edge_nodes[node_idx]);
+                for (int i = 0; i < execution_queries; ++i) {
+                    auto start = std::chrono::steady_clock::now();
+                    
+                    std::string query = generateRandomQuery(
+                        min_time, max_time, time_unit,
+                        edge_nodes.size(),
+                        node_idx,
+                        zipf_alpha
+                    );
+                    node_client.Query(query);
+                    
+                    auto end = std::chrono::steady_clock::now();
+                    total_latency_ms += std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "Execution error: " << e.what() << std::endl;
+            }
+        });
+    }
+
+    for (auto& t : execution_threads) {
+        t.join();
+    }
+
+    // Output results
+    std::cout << "\n=== Test completed ===" << std::endl;
+    std::cout << "Total requests: " << edge_nodes.size() * execution_queries << std::endl;
+    std::cout << "Total latency (ms): " << total_latency_ms << std::endl;
+    std::cout << "Average latency (ms): " << static_cast<double>(total_latency_ms) / (edge_nodes.size() * execution_queries) << std::endl;
+
     return 0;
 }

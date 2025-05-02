@@ -16,20 +16,20 @@ plt.rcParams.update({
 # 数据
 edge_network = ['5x5', '6x6', '7x7', '8x8', '9x9', '10x10']
 # 平均延时（ms）
-hcbf_avg_times =       [5.72, 6.12, 6.30, 6.41, 6.89, 6.96]
-trindex_avg_times =    [4.91, 4.96, 4.93, 4.97, 5.11, 5.11]  # 示例数据
+hcbf_avg_times =       [5.32, 5.66, 6.02, 6.15, 6.23, 6.30]
+trindex_avg_times =    [4.57, 4.63, 4.68, 4.75, 4.78, 4.79]  # 示例数据
 
 # P90延时（ms）
-hcbf_p90_times =       [11.66, 14.95, 16.07, 16.88, 18.48, 18.75]
-trindex_p90_times =    [9.39, 9.49, 9.47, 9.66, 9.74, 9.68]  # 示例数据
+hcbf_p90_times =       [10.10, 13.81, 16.42, 16.75, 17.98, 18.36]
+trindex_p90_times =    [9.44,  9.48, 9.58, 9.62, 9.63, 9.63]  # 示例数据
 
 # P95延时（ms）
-hcbf_p95_times =       [17.46, 19.61, 20.56, 20.68, 22.11, 22.28]  # 示例数据
-trindex_p95_times =    [9.60, 9.86, 9.81, 9.98, 9.92, 9.98]  # 示例数据
+hcbf_p95_times =       [16.92, 18.99, 20.90, 20.96, 21.64, 21.84]  # 示例数据
+trindex_p95_times =    [9.78, 9.90, 9.87, 9.95, 9.92, 9.86]  # 示例数据
 
 # P99延时（ms）
-hcbf_p99_times =       [23.15, 24.52, 25.16, 25.52, 26.32, 26.46]  # 示例数据
-trindex_p99_times =    [13.34, 13.68, 13.60, 13.76, 13.70, 13.76]  # 示例数据
+hcbf_p99_times =       [22.46, 24.18, 25.49, 25.69, 26.40, 26.39]  # 示例数据
+trindex_p99_times =    [13.33, 13.41, 13.30, 13.64, 13.67, 13.66]  # 示例数据
 
 # 创建子图
 fig, axs = plt.subplots(2, 2, figsize=(12, 10))
@@ -43,7 +43,7 @@ axs[0, 0].set_title('平均数据检索延时', fontsize=16)
 axs[0, 0].set_xlabel('边缘网络规模', fontsize=16)
 axs[0, 0].set_ylabel('数据检索延时 (ms)', fontsize=16)
 axs[0, 0].yaxis.set_major_locator(ticker.MaxNLocator(integer=True))  # 新增这行使纵坐标为整数
-#axs[0, 0].set_ylim(5, 35)  # 新增这行设置y轴上限为30
+axs[0, 0].set_ylim(4, 7)  # 新增这行设置y轴上限为30
 axs[0, 0].legend(loc='upper left', fontsize=16)  # 修改图例位置
 axs[0, 0].grid(True)
 

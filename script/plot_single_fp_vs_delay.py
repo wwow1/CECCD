@@ -32,7 +32,7 @@ allroaring_p95_times = []  # 示例数据
 
 # P99延时（ms）
 hcbf_p99_times =       [24.47, 21.84, 21.77, 12.83]  # 示例数据
-trindex_p99_times =    [14.88, 13.18, 9.95, 9.92]  # 示例数据
+trindex_p99_times =    [14.48, 13.18, 9.95, 9.92]  # 示例数据
 allroaring_p99_times = []  # 示例数据
 
 # 创建子图

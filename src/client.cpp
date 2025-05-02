@@ -1,13 +1,25 @@
 #include "client.h"
+#include <grpcpp/grpcpp.h>
 
-Client::Client(const std::string& server_address) {
-    auto channel = grpc::CreateChannel(server_address, grpc::InsecureChannelCredentials());
-    stub_ = cloud_edge_cache::ClientToEdge::NewStub(channel);
-    // 等待目标节点通道就绪
+Client::Client(const std::string& center_server_address) {
+    auto channel = grpc::CreateChannel(center_server_address, grpc::InsecureChannelCredentials());
+    center_stub_ = cloud_edge_cache::ClientToCenter::NewStub(channel);
+    
     if (!channel->WaitForConnected(gpr_time_add(
             gpr_now(GPR_CLOCK_REALTIME),
             gpr_time_from_seconds(5, GPR_TIMESPAN)))) {
-        std::cerr << "Failed to connect to target node " << server_address << std::endl;
+        std::cerr << "Failed to connect to center server " << center_server_address << std::endl;
+    }
+}
+
+void Client::BindToEdgeServer(const std::string& edge_server_address) {
+    auto channel = grpc::CreateChannel(edge_server_address, grpc::InsecureChannelCredentials());
+    edge_stub_ = cloud_edge_cache::ClientToEdge::NewStub(channel);
+    
+    if (!channel->WaitForConnected(gpr_time_add(
+            gpr_now(GPR_CLOCK_REALTIME),
+            gpr_time_from_seconds(5, GPR_TIMESPAN)))) {
+        std::cerr << "Failed to connect to edge server " << edge_server_address << std::endl;
     }
 }
 
@@ -23,7 +35,7 @@ std::string Client::Query(const std::string& sql_query) {
     grpc::ClientContext context;
 
     // Make the RPC call
-    grpc::Status status = stub_->Query(&context, request, &response);
+    grpc::Status status = edge_stub_->Query(&context, request, &response);
 
     // Handle response
     if (status.ok()) {
@@ -49,4 +61,17 @@ std::string Client::Query(const std::string& sql_query) {
     } else {
         return "RPC failed: " + status.error_message();
     }
+}
+
+std::vector<std::string> Client::GetEdgeNodes() {
+    grpc::ClientContext context;
+    cloud_edge_cache::Empty request;
+    cloud_edge_cache::EdgeNodesInfo response;
+    
+    auto status = center_stub_->GetEdgeNodes(&context, request, &response);
+    
+    if (status.ok()) {
+        return {response.edge_nodes().begin(), response.edge_nodes().end()};
+    }
+    return {};
 }

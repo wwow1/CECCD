@@ -145,3 +145,13 @@ message ClusterNodesUpdate {
     repeated NodeInfo nodes = 1;
     repeated StreamMetadata stream_metadata = 2;
 }
+
+// 在ClientToEdge服务后添加新的服务
+service ClientToCenter {
+    rpc GetEdgeNodes(Empty) returns (EdgeNodesInfo);
+}
+
+// 添加新的消息类型
+message EdgeNodesInfo {
+    repeated string edge_nodes = 1;  // 所有edge节点的IP列表
+}

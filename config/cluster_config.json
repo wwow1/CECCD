@@ -7,8 +7,8 @@
         "edge_capacity_gb": 2.0,
         "bloom_filter_fpr": 0.01,
         "index_latency_threshold_ms": 20,
-        "statistics_report_interval_s": 5,
-        "prediction_period_s": 30,
+        "statistics_report_interval_s": 4,
+        "prediction_period_s": 20,
         "log_file_path": "/tmp/server.log",
         "edge_log_level": "debug",
         "center_log_level": "debug"
