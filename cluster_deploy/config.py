@@ -63,12 +63,6 @@ cluster_config = {
             "ssh_user": "zfy",
             "role": "worker"
         },
-        {
-            "name": "ca62",
-            "ip": "192.168.6.62",
-            "ssh_user": "zfy",
-            "role": "worker"
-        }
     ],
     "num_nodes": 25,
     # 网络延迟配置（单位：毫秒）

@@ -299,6 +299,10 @@ int main(int argc, char* argv[]) {
             }
         });
     }
+    
+    int64_t current = total_latency_ms.load();
+    while (!total_latency_ms.compare_exchange_weak(current, current * 2)) {
+    }
 
     for (auto& t : execution_threads) {
         t.join();

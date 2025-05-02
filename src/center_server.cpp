@@ -115,7 +115,7 @@ grpc::Status CenterServer::ReportStatistics(grpc::ServerContext* context,
         stats[server_address].first++;
         stats[server_address].second += block_stat.selectivity();
         
-        spdlog::debug("Updated stats for block {} from {})", key, server_address);
+        spdlog::debug("Updated stats for block {} from {}", key, server_address);
     }
     
     return grpc::Status::OK;
